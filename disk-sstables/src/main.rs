@@ -25,7 +25,7 @@ async fn main() -> std::io::Result<()> {
 #[get("/{key}")]
 pub async fn get_value_for_key(web::Path(key): web::Path<String>) -> impl Responder {
     //Get the key!
-    HttpResponse::Ok().body(map.get(&key).unwrap())
+    HttpResponse::Ok().body(key)
 }
 
 #[post("/{key}")]

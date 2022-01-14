@@ -48,18 +48,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("putting data {}", value);
             let client = reqwest::Client::new();
             let data = value.clone();
-            let _res = client.post(format!("http://{}/{}\n",host, key))
+            let resp = client.post(format!("http://{}:8080/{}\n",host, key))
                 .body(data)
                 .send()
-                .await?;
+                .await?
+                .text().await?;
+
+            println!("{}",resp)
         }
 
         Commands::Get { key , host} => {
             println!("getting data for key {}", key);
-            let _resp = reqwest::get(format!("http://{}/{}\n",host, key))
+            let resp = reqwest::get(format!("http://{}:8080/{}\n",host, key))
             .await?
-            .json::<HashMap<String, String>>()
+            .text()
             .await?;
+            println!("key {}:{}",key,resp)
         }
     }
 

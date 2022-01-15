@@ -1,4 +1,4 @@
-use actix_web::{get, post, web, App, Responder, Result,HttpResponse,HttpServer};
+use actix_web::{get, post,delete, web, App, Responder, Result,HttpResponse,HttpServer};
 #[macro_use]
 extern crate lazy_static;
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ async fn main() -> std::io::Result<()> {
             App::new()
                 .service(get_value_for_key)
                 .service(put_value_for_key)
-                .route("/hey", web::get().to(manual_hello))
+                .service(delete_value_for_key)
         })
         .bind("127.0.0.1:8080")?
         .run()
@@ -42,6 +42,9 @@ pub async fn put_value_for_key(web::Path(key): web::Path<String>,req_body: Strin
     HttpResponse::Ok().body("It is saved... in memory!")
 }
 
-pub async fn manual_hello() -> impl Responder {
-    HttpResponse::Ok().body("Hey there!")
+#[delete("/{key}")]
+pub async fn delete_value_for_key(web::Path(key): web::Path<String>) -> impl Responder {
+    let mut map = HASHMAP.lock().unwrap();
+    map.remove(&key);
+    HttpResponse::Ok().body("It has been deleted!")
 }

@@ -23,6 +23,12 @@ enum Commands {
         key: String,
         #[clap(long, default_value = "localhost")]
         host: String,
+    },
+
+    Delete {
+        key: String,
+        #[clap(long, default_value = "localhost")]
+        host: String,
     }
 
 }
@@ -64,6 +70,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .text()
             .await?;
             println!("key {}:{}",key,resp)
+        }
+
+        Commands::Delete { key, host} => {
+            println!("deleting data for key {}", key);
+            let client = reqwest::Client::new();
+            let resp = client.delete(format!("http://{}:8080/{}\n",host, key)).send()
+            .await?
+            .text()
+            .await?;
         }
     }
 

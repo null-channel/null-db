@@ -1,11 +1,27 @@
-use actix_web::{get, post, delete, web, App, Responder, Result,HttpResponse,HttpServer};
+use actix_web::{
+    get, 
+    post, 
+    delete, 
+    web, 
+    App, 
+    Responder, 
+    Result,
+    HttpResponse,
+    HttpServer
+};
 #[macro_use]
 extern crate lazy_static;
-use easy_reader::EasyReader;
+mod file_reader;
+//use easy_reader::EasyReader;
+use file_reader::EasyReader;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
+use std::collections::HashSet;
 use std::{
-    fs::File,
+    fs::{
+        File,
+        write
+    },
     io::{
         self,
         Error
@@ -39,7 +55,6 @@ pub async fn get_value_for_key(web::Path(key): web::Path<String>) -> impl Respon
 
     let file = File::open("null.database").unwrap();
     let mut reader = EasyReader::new(file).unwrap();
-
     // Generate index (optional)
     reader.build_index();
     reader.eof();
@@ -47,13 +62,13 @@ pub async fn get_value_for_key(web::Path(key): web::Path<String>) -> impl Respon
         let split = line.split(":").collect::<Vec<&str>>();
         if split.len() == 2 {
             if split[0] == key {
-                return HttpResponse::Ok().body(split[1].to_string().clone())
+                return HttpResponse::Ok().body(split[1].to_string().clone());
             }
         }
         println!("{}", line);
     }
 
-    // Repeat process by seeking back by chunk_size again.
+    // Repeat process by seeking back by chunk_size again.;
     HttpResponse::Ok().body("value not found")
 }
 
@@ -79,16 +94,46 @@ pub async fn delete_value_for_key(web::Path(key): web::Path<String>) -> impl Res
 
     // Generate index (optional)
     reader.build_index();
-    reader.eof();
+    let mut lines = HashSet::new();
     while let Some(line) = reader.prev_line().unwrap() {
         let split = line.split(":").collect::<Vec<&str>>();
         if split.len() == 2 {
             if split[0] == key {
-                return HttpResponse::Ok().body(split[1].to_string().clone())
+                let current_line = *reader
+                .newline_map
+                .get(&(reader.current_start_line_offset as usize))
+                .unwrap();
+                lines.insert(current_line);
             }
         }
         println!("{}", line);
     }
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("null.database")
+        .expect("file.txt doesn't exist or so");
+
+    let mut lines = BufReader::new(file).lines()
+        .flat_map(|x| {
+            if let Ok(line) = x {
+                let split = line.split(":").collect::<Vec<&str>>();
+                if split.len() == 2 {
+                    if split[0] == key {
+                        return None;
+                    }
+                    else {
+                        return Some(line);
+                    }
+                }
+            }
+            return None;
+        })
+        .collect::<Vec<String>>().join("\n");
+
+    std::fs::write("null.database", lines).expect("Can't write");
+    
     HttpResponse::Ok().body("It has been deleted!")
 }
 

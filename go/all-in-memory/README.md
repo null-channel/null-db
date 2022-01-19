@@ -32,6 +32,11 @@ curl -d '{"key":"hey","value":"world"}' -H "Content-Type: application/json" http
 curl -d '{"key":"hey"}' -H "Content-Type: application/json" http://localhost:4000/get  
 ```
 
+### Deleting a value 
+```shell
+curl -d '{"key":"hey"}' -H "Content-Type: application/json" http://localhost:4000/pop 
+```
+
 ## Clean up 
 
 `make clean`

@@ -30,7 +30,7 @@ func (kv *KVStore) Set(k, v string) string {
 
 func (kv *KVStore) Delete(k string) string {
 	defer kv.mu.RUnlock()
-	kv.mu.Lock()
+	kv.mu.RLock()
 	delete(kv.store, k)
 	return "true"
 }

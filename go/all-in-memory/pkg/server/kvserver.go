@@ -22,6 +22,11 @@ type InsertRequest struct {
 type GetRequest struct {
 	Key string `json:"key"`
 }
+
+type DeleteRequest struct {
+	Key string `json:"key"`
+}
+
 func NewKvServer(l *log.Logger, kv *kv.KVStore) *KvServer{
 	return &KvServer{l,kv}
 }
@@ -54,4 +59,16 @@ func (s *KvServer) GetHandler(rw http.ResponseWriter, r *http.Request){
       val := s.kv.Get(req.Key)
       rw.Write([]byte(val))
 }
+func (s *KvServer) DeleteHandler(rw http.ResponseWriter,  r *http.Request){
+	s.l.Printf("received delete request")
+	req := DeleteRequest{}
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err !=nil{
+		s.l.Println("unable to process request")
+		http.Error(rw,"unable to process",500)
+	}
+	s.l.Printf("deleting key %s",req.Key)
+	resp := s.kv.Delete(req.Key)
+	rw.Write([]byte(resp))
 
+}

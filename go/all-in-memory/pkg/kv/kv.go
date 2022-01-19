@@ -15,17 +15,25 @@ func NewKv() *KVStore{
 
 // Get returns the value of k  
 func ( kv *KVStore) Get(k string) string{
-	defer kv.mu.Unlock()
-	kv.mu.Lock()
+	defer kv.mu.RUnlock()
+	kv.mu.RLock()
 	val := kv.store[k]
 	return val 
 }
 
 func (kv *KVStore) Set(k,v string) string {
-	defer kv.mu.Unlock()
-	kv.mu.Lock()
+	defer kv.mu.RUnlock()
+	kv.mu.RLock()
 	kv.store[k] =  v 
 	return k 
 }
+
+func (kv *KVStore) Delete(k string) string{
+   defer kv.mu.RUnlock()
+   kv.mu.Lock()
+   delete(kv.store,k)
+   return "true"
+}
+
 
 

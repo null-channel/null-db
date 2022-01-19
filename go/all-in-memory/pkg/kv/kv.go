@@ -22,15 +22,15 @@ func (kv *KVStore) Get(k string) string {
 }
 
 func (kv *KVStore) Set(k, v string) string {
-	defer kv.mu.RUnlock()
-	kv.mu.RLock()
+	defer kv.mu.Unlock()
+	kv.mu.Lock()
 	kv.store[k] = v
 	return k
 }
 
 func (kv *KVStore) Delete(k string) string {
-	defer kv.mu.RUnlock()
-	kv.mu.RLock()
+	defer kv.mu.Unlock()
+	kv.mu.Lock()
 	delete(kv.store, k)
 	return "true"
 }

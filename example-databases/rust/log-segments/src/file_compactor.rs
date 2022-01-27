@@ -28,7 +28,7 @@ fn compactor() {
     let paths = fs::read_dir("./").unwrap();
 
     let dbfiles = paths.flat_map(|x| {
-        if get_extension_from_filename(x) == Some("nullpack") {
+        if get_extension_from_filename(x) == Some("npack") {
             return Some(x);
         }
         return None;

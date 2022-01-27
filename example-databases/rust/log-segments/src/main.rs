@@ -20,13 +20,15 @@ use std::collections::HashSet;
 use std::{
     fs::{
         File,
-        write
+        write,
+        copy
     },
     io::{
         self,
         Error
     }
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::BufReader;
 use std::sync::RwLock; // read heavy -- probably better period.
 
@@ -80,9 +82,33 @@ pub async fn put_value_for_key(web::Path(key): web::Path<String>,req_body: Strin
         .open("null.database")
         .unwrap();  
 
-    if let Err(e) = writeln!(file,"{}:{}",key, req_body) {
-        eprintln!("Couldn't write to file: {}", e);
+
+    // make new file if over our 64 lines max
+    let f = BufReader::new(file);
+    if f.lines().count() > 64 {
+
+        let start = SystemTime::now();
+        let since_the_epoch = start
+            .duration_since(UNIX_EPOCH);
+        std::fs::copy("null.database", format!("{:?}.{}", since_the_epoch, "npack")).unwrap();
+
+        let mut tun = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .truncate(true)
+            .open("null.database")
+            .unwrap(); 
+        if let Err(e) = writeln!(tun,"{}:{}",key, req_body) {
+            eprintln!("Couldn't write to file: {}", e);
+        }
+        return HttpResponse::Ok().body("It is saved... to disk!!!");
     }
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("null.database")
+        .unwrap();  
 
     HttpResponse::Ok().body("It is saved... to disk!!!")
 }

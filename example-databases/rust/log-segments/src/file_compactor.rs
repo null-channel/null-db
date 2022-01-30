@@ -1,42 +1,65 @@
-use std::thread;
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 use std::sync::mpsc;
-use std::thread;
+use std::sync::mpsc::TryRecvError;
 use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::BTreeMap;
+use std::io::BufReader;
+use std::ffi::OsString;
+use std::io::BufRead;
+use std::ffi::OsStr;
+use std::{thread, time};
+use std::{
+    fs::{
+        File,
+        write,
+        copy
+    },
+    io::{
+        self,
+        Error
+    }
+};
+use std::fs::OpenOptions;
+use std::path::Path;
 
-fn start_compaction() {
+pub fn start_compaction(rx: Receiver<i32>) {
 
-    let (tx, rx) = mpsc::channel();
     thread::spawn(move || loop {
-        println!("Suspending...");
-        match rx.recv() {
-            Ok(_) => {
-                println!("compacting!!!");
-                thread::sleep(Duration::from_millis(5000));
-            }
-            Err(_) => {
-                println!("Terminating.");
+        match rx.try_recv() {
+            Err(TryRecvError::Empty) => println!("compact!"),
+            _ => {
+                println!("call to quite compaction");
                 break;
             }
         }
+        compactor();
+        // TODO: Make configurable? Need configuration filz...
+
+        println!("Suspending...");
+        thread::sleep(time::Duration::from_secs(5));
     });
 
 }
 
 fn compactor() {
-    let paths = fs::read_dir("./").unwrap();
+    let paths = std::fs::read_dir("./").unwrap();
 
-    let dbfiles = paths.flat_map(|x| {
-        if get_extension_from_filename(x) == Some("npack") {
-            return Some(x);
+    let mut dbfiles = paths.into_iter().flat_map(|x| {
+        match x {
+            Ok(y) => {
+                if get_extension_from_filename(y.file_name().to_str().unwrap()) == Some("npack") {
+                    return Some(y.file_name().into_string().unwrap());
+                }
+            }
+            Err(_) => return None
         }
         return None;
-    })
-    .collect::<Vec<String>>()
-    .sort();
+    }).collect::<Vec<String>>();
+    
+    dbfiles.sort_unstable();
 
-    let mut data_set = HashSet::new();
+    let mut data_map = HashMap::new();
 
     for file_path in dbfiles {
 
@@ -46,31 +69,31 @@ fn compactor() {
             .open(file_path)
             .expect("db pack file doesn't exist.");
 
-
+    /* 
         reader.build_index();
         reader.eof();
         while let Some(line) = reader.prev_line().unwrap() {
             
         }
-        let lines = BufReader::new(file).lines();
+        */
+        let f = BufReader::new(file);
+        let lines = f.lines();
         for line in lines {
-            let split = line.split(":").collect::<Vec<&str>>();
+            let line_r = line.unwrap();
+            let split = line_r.split(":").collect::<Vec<&str>>();
                 if split.len() == 2 {
-                    if split[0] == key {
-
-                    }
+                    if !data_map.contains_key(split[0]) {
+                        data_map.insert(split[0].to_string(),split[1].to_string());
+                    } 
                 }
             }
-            data_set.insert(line)
         }
-        if data_set.len() > 64 {
-
-        }
-        .collect::<Vec<String>>().join("\n");
+    if data_map.len() > 64 {
 
     }
- 
+
 }
+ 
 
 fn get_extension_from_filename(filename: &str) -> Option<&str> {
     Path::new(filename)

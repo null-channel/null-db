@@ -17,6 +17,7 @@ use file_reader::EasyReader;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::collections::HashSet;
+use std::sync::mpsc;
 use std::{
     fs::{
         File,
@@ -31,10 +32,14 @@ use std::{
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::BufReader;
 use std::sync::RwLock; // read heavy -- probably better period.
+mod file_compactor;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {    
     let file_mutex = Data::new(RwLock::new(false));
+
+    let (tx, rx) = mpsc::channel();
+    file_compactor::start_compaction(rx);
 
     HttpServer::new(move || {
         App::new()
@@ -46,7 +51,6 @@ async fn main() -> std::io::Result<()> {
         .bind("127.0.0.1:8080")?
         .run()
         .await
-    
 }
 
 #[get("/{key}")]
@@ -83,32 +87,32 @@ pub async fn put_value_for_key(
     // Locking lets us protect the integraty of our file for now
     // 
     let _write_lock = file_mutex.write();
-    let mut file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open("null.database")
-        .unwrap();  
+    let mut line_count = 0;
+    {
+        let file = File::open("null.database").unwrap(); 
 
-
-    // make new file if over our 64 lines max
-    let f = BufReader::new(file);
-    if f.lines().count() > 64 {
+        // make new file if over our 64 lines max
+        let f = BufReader::new(file);
+        line_count = f.lines().count();
+    }
+    println!("Hey you!");
+    if line_count > 64 {
 
         let start = SystemTime::now();
         let since_the_epoch = start
-            .duration_since(UNIX_EPOCH);
+            .duration_since(UNIX_EPOCH)
+            .unwrap();
         std::fs::copy("null.database", format!("{:?}.{}", since_the_epoch, "npack")).unwrap();
 
         let mut tun = OpenOptions::new()
             .write(true)
-            .append(true)
             .truncate(true)
             .open("null.database")
             .unwrap(); 
         if let Err(e) = writeln!(tun,"{}:{}",key, req_body) {
             eprintln!("Couldn't write to file: {}", e);
         }
-        return HttpResponse::Ok().body("It is saved... to disk!!!");
+        return HttpResponse::Ok().body("Saved and made log file");
     }
 
     let mut file = OpenOptions::new()
@@ -116,8 +120,12 @@ pub async fn put_value_for_key(
         .append(true)
         .open("null.database")
         .unwrap();  
+        
+    if let Err(e) = writeln!(file,"{}:{}",key, req_body) {
+        eprintln!("Couldn't write to file: {}", e);
+    }
 
-    HttpResponse::Ok().body("It is saved... to disk!!!")
+    HttpResponse::Ok().body("It is saved, no log file needed")
 }
 
 #[delete("/{key}")]

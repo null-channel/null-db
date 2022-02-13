@@ -33,6 +33,8 @@ use std::io::BufReader;
 use std::sync::RwLock; // read heavy -- probably better period.
 mod file_compactor;
 
+const TOMBSTONE: &'static str = "-tombstone-";
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {    
     let file_mutex = Data::new(RwLock::new(false));
@@ -67,6 +69,10 @@ pub async fn get_value_for_key(
         let split = line.split(":").collect::<Vec<&str>>();
         if split.len() == 2 {
             if split[0] == key {
+                let val = split[1].to_string().clone();
+                if val == TOMBSTONE {
+                    return HttpResponse::Ok().body("value not found");
+                }
                 return HttpResponse::Ok().body(split[1].to_string().clone());
             }
         }
@@ -94,7 +100,7 @@ pub async fn put_value_for_key(
         let f = BufReader::new(file);
         line_count = f.lines().count();
     }
-    println!("Hey you!");
+    
     if line_count > 64 {
 
         let start = SystemTime::now();
@@ -132,51 +138,16 @@ pub async fn delete_value_for_key(
     file_mutex: Data<RwLock<bool>>, 
     web::Path(key): web::Path<String>
 ) -> impl Responder {
-    let _file_lock = file_mutex.write();
-    let file = File::open("null.database").unwrap();
-    let mut reader = EasyReader::new(file).unwrap();
-
-    // Generate index (optional)
-    reader.build_index();
-    let mut lines = HashSet::new();
-    while let Some(line) = reader.prev_line().unwrap() {
-        let split = line.split(":").collect::<Vec<&str>>();
-        if split.len() == 2 {
-            if split[0] == key {
-                let current_line = *reader
-                .newline_map
-                .get(&(reader.current_start_line_offset as usize))
-                .unwrap();
-                lines.insert(current_line);
-            }
-        }
-        println!("{}", line);
-    }
-
+    
     let mut file = OpenOptions::new()
-        .read(true)
         .write(true)
+        .append(true)
         .open("null.database")
-        .expect("file.txt doesn't exist or so");
-
-    let mut lines = BufReader::new(file).lines()
-        .flat_map(|x| {
-            if let Ok(line) = x {
-                let split = line.split(":").collect::<Vec<&str>>();
-                if split.len() == 2 {
-                    if split[0] == key {
-                        return None;
-                    }
-                    else {
-                        return Some(line);
-                    }
-                }
-            }
-            return None;
-        })
-        .collect::<Vec<String>>().join("\n");
-
-    std::fs::write("null.database", lines).expect("Can't write");
+        .unwrap();
+    
+    if let Err(e) = writeln!(file,"{}:{}",key, TOMBSTONE) {
+        eprintln!("Couldn't write to file: {}", e);
+    }
     
     HttpResponse::Ok().body("It has been deleted!")
 }

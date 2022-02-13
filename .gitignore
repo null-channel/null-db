@@ -10,3 +10,7 @@ Cargo.lock
 **/*.rs.bk
 
 **/target/
+
+# These are created by the database
+**/*.nnpack
+**/*.npack

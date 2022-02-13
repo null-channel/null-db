@@ -3,6 +3,7 @@ use std::time::Duration;
 use std::sync::mpsc;
 use std::sync::mpsc::TryRecvError;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::BufReader;
 use std::ffi::OsString;
@@ -39,7 +40,7 @@ pub fn start_compaction(rx: Receiver<i32>) {
         // TODO: Make configurable? Need configuration filz...
 
         println!("Suspending...");
-        thread::sleep(time::Duration::from_secs(5));
+        thread::sleep(time::Duration::from_secs(30));
     });
 
 }
@@ -64,6 +65,7 @@ fn compactor() {
         match x {
             Ok(y) => {
                 if get_extension_from_filename(y.file_name().to_str().unwrap()) == Some("nnpack") {
+                    println!("new pack file found");
                     return Some(y.file_name().into_string().unwrap());
                 }
             }
@@ -79,9 +81,12 @@ fn compactor() {
     */
     pack_files.sort_unstable();
 
+    // pack all old pack files
     let mut data_map = HashMap::new();
-
-    for file_path in pack_files {
+    let mut to_delete = HashSet::new();
+    // Collect all new pack files first as these will cary the tombstone and should
+    // be removed from all the
+    for file_path in new_pack_files.clone() {
 
         let mut file = OpenOptions::new()
             .read(true)
@@ -96,11 +101,42 @@ fn compactor() {
             let split = line_r.split(":").collect::<Vec<&str>>();
             if split.len() == 2 {
                 if !data_map.contains_key(split[0]) {
-                    data_map.insert(split[0].to_string(),split[1].to_string());
+                    if split[1] == "-tombstone-" {
+                        //Add this to the set to be deleted
+                        to_delete.insert(split[0].to_string());
+                    } else {
+                        // Addthis to the data to be compacted
+                        data_map.insert(split[0].to_string(),split[1].to_string());
+                    }
                 }
             }
         }
     }
+
+    for file_path in pack_files.clone() {
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(file_path)
+            .expect("db pack file doesn't exist.");
+
+        let f = BufReader::new(file);
+        let lines = f.lines();
+        for line in lines {
+            let line_r = line.unwrap();
+            let split = line_r.split(":").collect::<Vec<&str>>();
+            if split.len() == 2 {
+                if !data_map.contains_key(split[0]) {
+                    if !to_delete.contains(split[0]) {
+                        data_map.insert(split[0].to_string(),split[1].to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    
     let start = SystemTime::now();
     let since_the_epoch = start
         .duration_since(UNIX_EPOCH)
@@ -122,19 +158,42 @@ fn compactor() {
         // only works with a single threaded compacter.
         let mut file = OpenOptions::new()
             .create(true)
+            .write(true)
             .open(format!("{:?}{}.{}", since_the_epoch,i, "npack"))
-            .unwrap();  
+            .unwrap();
         for line in to_write {
             if let Err(e) = writeln!(file,"{}",line) {
                 eprintln!("Couldn't write to file: {}", e);
             }
         }
-        // use i to make files sortable by "youngest"
-        std::fs::copy("null.database", format!("{:?}{}.{}", since_the_epoch,i, "npack")).unwrap();
+    }
 
+    let start = data_map.len() - leftover;
+
+    let to_write = &data[start..data_map.len()];
+    // use i to make files sortable by "youngest" but named differently
+    // only works with a single threaded compacter.
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(format!("{:?}{}.{}", since_the_epoch,i, "npack"))
+        .unwrap();
+    for line in to_write {
+        if let Err(e) = writeln!(file,"{}",line) {
+            eprintln!("Couldn't write to file: {}", e);
+        }
+    }
+
+
+    // delete old npack files
+    for file_path in pack_files {
+        std::fs::remove_file(file_path);
     }
 
     // delete old npack files
+    for file_path in new_pack_files {
+        std::fs::remove_file(file_path);
+    }
 
 }
  

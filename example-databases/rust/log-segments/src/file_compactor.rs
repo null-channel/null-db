@@ -3,11 +3,13 @@ use std::time::Duration;
 use std::sync::mpsc;
 use std::sync::mpsc::TryRecvError;
 use std::collections::HashMap;
-use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::BufReader;
 use std::ffi::OsString;
 use std::io::BufRead;
 use std::ffi::OsStr;
+use std::io::{Write, Result};
+use std::io::prelude::*;
 use std::{thread, time};
 use std::{
     fs::{
@@ -45,7 +47,7 @@ pub fn start_compaction(rx: Receiver<i32>) {
 fn compactor() {
     let paths = std::fs::read_dir("./").unwrap();
 
-    let mut dbfiles = paths.into_iter().flat_map(|x| {
+    let mut pack_files = paths.into_iter().flat_map(|x| {
         match x {
             Ok(y) => {
                 if get_extension_from_filename(y.file_name().to_str().unwrap()) == Some("npack") {
@@ -56,12 +58,30 @@ fn compactor() {
         }
         return None;
     }).collect::<Vec<String>>();
-    
-    dbfiles.sort_unstable();
+
+    let new_pack_files_dir = std::fs::read_dir("./").unwrap();
+    let mut new_pack_files = new_pack_files_dir.into_iter().flat_map(|x| {
+        match x {
+            Ok(y) => {
+                if get_extension_from_filename(y.file_name().to_str().unwrap()) == Some("nnpack") {
+                    return Some(y.file_name().into_string().unwrap());
+                }
+            }
+            Err(_) => return None
+        }
+        return None;
+    }).collect::<Vec<String>>();
+
+    /*
+    * unstable is faster, but could reorder "same" values. 
+    * We will not have same values
+    * it does not matter even if we did
+    */
+    pack_files.sort_unstable();
 
     let mut data_map = HashMap::new();
 
-    for file_path in dbfiles {
+    for file_path in pack_files {
 
         let mut file = OpenOptions::new()
             .read(true)
@@ -69,28 +89,52 @@ fn compactor() {
             .open(file_path)
             .expect("db pack file doesn't exist.");
 
-    /* 
-        reader.build_index();
-        reader.eof();
-        while let Some(line) = reader.prev_line().unwrap() {
-            
-        }
-        */
         let f = BufReader::new(file);
         let lines = f.lines();
         for line in lines {
             let line_r = line.unwrap();
             let split = line_r.split(":").collect::<Vec<&str>>();
-                if split.len() == 2 {
-                    if !data_map.contains_key(split[0]) {
-                        data_map.insert(split[0].to_string(),split[1].to_string());
-                    } 
+            if split.len() == 2 {
+                if !data_map.contains_key(split[0]) {
+                    data_map.insert(split[0].to_string(),split[1].to_string());
                 }
             }
         }
-    if data_map.len() > 64 {
+    }
+    let start = SystemTime::now();
+    let since_the_epoch = start
+        .duration_since(UNIX_EPOCH)
+        .unwrap();
+
+    // write compacted data
+    let mut i = 0;
+    let mut leftover = data_map.len()%64;
+    let data = data_map
+        .iter()
+        .map(|x| {
+            let (key, value) = x;
+            i = i + 1;
+            return format!("{}:{}",key,value)
+        }).collect::<Vec<String>>();
+    while i < data_map.len() && (i + 64) < data_map.len() {
+        let to_write = &data[i..(i+64)];
+        // use i to make files sortable by "youngest" but named differently
+        // only works with a single threaded compacter.
+        let mut file = OpenOptions::new()
+            .create(true)
+            .open(format!("{:?}{}.{}", since_the_epoch,i, "npack"))
+            .unwrap();  
+        for line in to_write {
+            if let Err(e) = writeln!(file,"{}",line) {
+                eprintln!("Couldn't write to file: {}", e);
+            }
+        }
+        // use i to make files sortable by "youngest"
+        std::fs::copy("null.database", format!("{:?}{}.{}", since_the_epoch,i, "npack")).unwrap();
 
     }
+
+    // delete old npack files
 
 }
  
@@ -100,3 +144,12 @@ fn get_extension_from_filename(filename: &str) -> Option<&str> {
         .extension()
         .and_then(OsStr::to_str)
 }
+
+fn get_generation_from_filename(filename: &str) -> &str {
+    let file_name = Path::new(filename)
+        .file_name().unwrap()
+        .to_str().unwrap();
+    let split = file_name.split(":").collect::<Vec<&str>>();
+    return split[0];
+}
+

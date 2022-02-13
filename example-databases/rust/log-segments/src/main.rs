@@ -5,7 +5,6 @@ use actix_web::{
     web::{self, Data}, 
     App, 
     Responder, 
-    Result,
     HttpResponse,
     HttpServer
 };
@@ -102,7 +101,7 @@ pub async fn put_value_for_key(
         let since_the_epoch = start
             .duration_since(UNIX_EPOCH)
             .unwrap();
-        std::fs::copy("null.database", format!("{:?}.{}", since_the_epoch, "npack")).unwrap();
+        std::fs::copy("null.database", format!("{:?}.{}", since_the_epoch, "nnpack")).unwrap();
 
         let mut tun = OpenOptions::new()
             .write(true)

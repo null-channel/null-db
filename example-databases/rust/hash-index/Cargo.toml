@@ -1,0 +1,14 @@
+[package]
+name = "disk-log"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-web = "3"
+serde = "1"
+lazy_static = "1.4.0"
+easy_reader = "0.5.1"
+fnv = "1.0.7"
+bytes = "1.1.0"

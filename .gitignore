@@ -10,3 +10,27 @@ Cargo.lock
 **/*.rs.bk
 
 **/target/
+
+# Python
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+__pypackages__/
+
+# SageMath parsed files
+*.sage.py
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/

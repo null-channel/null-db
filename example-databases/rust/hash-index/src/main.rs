@@ -32,6 +32,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::BufReader;
 use std::sync::RwLock; // read heavy -- probably better period.
 mod file_compactor;
+mod file_manager;
 
 const TOMBSTONE: &'static str = "-tombstone-";
 
@@ -41,6 +42,8 @@ async fn main() -> std::io::Result<()> {
 
     let (tx, rx) = mpsc::channel();
     file_compactor::start_compaction(rx);
+
+    let _thing = file_manager::FileManager::new("my dude".to_string());
 
     HttpServer::new(move || {
         App::new()

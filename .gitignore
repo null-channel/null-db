@@ -11,8 +11,11 @@ Cargo.lock
 
 **/target/
 
-# Python
+# These are created by the database
+**/*.nnpack
+**/*.npack
 
+# Python
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -25,12 +28,10 @@ __pycache__/
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow
 __pypackages__/
-
-# SageMath parsed files
-*.sage.py
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+

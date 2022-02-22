@@ -1,6 +1,5 @@
-from asyncio.log import logger
 import os
-from bottle import route, run, request, get, post
+from bottle import route, run, request,post
 from database import KVDatabase
 
 db = KVDatabase()
@@ -8,7 +7,6 @@ db = KVDatabase()
 @route('/get', method='GET')
 def get():
     key = request.query.key
-    logger.info(f"Get: {key}")
     value = db.get(key)
     return value
 

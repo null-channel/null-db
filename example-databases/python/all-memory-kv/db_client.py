@@ -1,9 +1,6 @@
-import json
 import os
 import sys
 import requests
-from urllib import request
-from loguru import logger
 
 NULL_HOST = os.environ.get("NULL_HOST", "localhost")
 NULL_PORT = os.environ.get("NULL_PORT", 4567)
@@ -46,7 +43,6 @@ try:
         print(f"Connected to db: {DB_URL}")
 except requests.exceptions.RequestException:
     raise ConnectionError("Cannot connect to db at: {DB_URL}")
-    sys.exit(1)
 
 while True:
     try:

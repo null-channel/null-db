@@ -14,3 +14,24 @@ Cargo.lock
 # These are created by the database
 **/*.nnpack
 **/*.npack
+
+# Python
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+__pypackages__/
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+

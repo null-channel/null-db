@@ -105,16 +105,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Bench {records,duration,host} => {
             println!("benchmarking database");
-            benchmark(*records,*duration);
+            benchmark(*records,*duration,host.to_string());
         }
     }
 
     Ok(())
 }
 
-async fn benchmark(records: i32, duration: i32) -> Option<()> {
+async fn benchmark(records: i32, duration: i32, host: String) -> Option<()> {
 
-    let client = null_client::NullClient::new("http://{}:8080/".to_string());
+    let client = null_client::NullClient::new(format!("http://{}:8080/", host).to_string());
 
     println!("Countdown");
     let now = time::Instant::now();

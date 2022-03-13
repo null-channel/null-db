@@ -1,16 +1,18 @@
-#![feature(core)]
-#![feature(io)]
-#![feature(std_misc)]
 
 use std::collections::HashMap;
 use clap::{AppSettings, Parser, Subcommand};
-use std::rand::{self, Rng};
 use uuid::Uuid;
-use std::old_io::Timer;
-use std::old_io::timer;
-use std::time::duration::Duration;
+use std::time::Duration;
 use std::iter;
 use std::sync::mpsc;
+use std::{thread, time};
+use std::convert::TryInto;
+use rand::Rng;
+use rand::prelude::*;
+use rand::{thread_rng};
+use rand::distributions::{Alphanumeric, Uniform, Standard};
+
+mod null_client;
 
 #[derive(Parser)]
 #[clap(name = "nulldb")]
@@ -102,38 +104,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Bench {records,duration,host} => {
-            println!("benchmarking database")
-            benchmark(records,duration);
+            println!("benchmarking database");
+            benchmark(*records,*duration);
         }
     }
 
     Ok(())
 }
 
-async fn benchmark(records: i32, duration: i32) => Option<()> {
-    let interval = Duration::milliseconds(1000);
-    let metronome: mpsc::Receiver<()> = timer.periodic(interval);
+async fn benchmark(records: i32, duration: i32) -> Option<()> {
+
+    let client = null_client::NullClient::new("http://{}:8080/".to_string());
 
     println!("Countdown");
-    for i in iter::range_step(duration, 0, -1) {
+    let now = time::Instant::now();
+    let mut rng = rand::thread_rng();
+    for i in 1..duration {
+        let then = time::Instant::now();
+
         // This loop will run once every second
-        let _ = metronome.recv();
-        while i < records {
+        for r in 1..records {
             let client = reqwest::Client::new();
-                let data = value.clone();
                 client.post(format!("http://localhost:8080/{}\n", Uuid::new_v4()))
-                    .body(getRandomString(rand::random();))
+                    .body(get_random_string(rng.gen::<usize>()))
                     .send();
+        
         }
-        println!("{}", i);
+
+        let dur: u64 = ((time::Instant::now()-then).as_millis()).try_into().unwrap();
+        let sleep_time: u64 = 1000 - dur;
+
+        if sleep_time > 0 {
+            let sleep_dura = time::Duration::from_nanos(sleep_time);
+            thread::sleep(sleep_dura);
+        }
     }
+    
     return Some(())
 }
 
-fn getRandomString(length: i32) -> String {
-    rand::thread_rng()
-        .gen_ascii_chars()
-        .take(length)
-        .collect::<String>()
+fn get_random_string(length: usize) -> String {
+    let chars: Vec<u8> = rand::thread_rng().sample_iter(&Alphanumeric).take(length).collect();
+    let s = std::str::from_utf8(&chars).unwrap().to_string();
+    return s;
 }
 

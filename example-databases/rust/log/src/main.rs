@@ -6,7 +6,7 @@ use actix_web::{
     App, 
     Responder, 
     HttpResponse,
-    HttpServer
+    HttpServer, dev::HttpResponseBuilder
 };
 #[macro_use]
 extern crate lazy_static;
@@ -15,18 +15,15 @@ mod file_reader;
 use file_reader::EasyReader;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
-use std::collections::HashSet;
 use std::{
     fs::{
         File,
-        write
     },
     io::{
         self,
         Error
     }
 };
-use std::io::BufReader;
 use std::sync::RwLock; // read heavy better for sure -- probably better period.
 
 const TOMBSTONE: &'static str = "-tombstone-";
@@ -34,7 +31,7 @@ const TOMBSTONE: &'static str = "-tombstone-";
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
 
-    let file_mutex = Data::new(RwLock::new(false));
+    let file_mutex = Data::new(RwLock::new("null.db"));
 
     HttpServer::new(move || {
         App::new()
@@ -51,13 +48,13 @@ async fn main() -> std::io::Result<()> {
 
 #[get("/{key}")]
 pub async fn get_value_for_key(
-    file_mutex: Data<RwLock<bool>>, 
+    file_mutex: Data<RwLock<&str>>, 
     web::Path(key): web::Path<String>
 ) -> impl Responder {
     //it's just protecting the OS's file access
-    let _reader = file_mutex.read();
+    let reader = *file_mutex.read().unwrap();
 
-    let file = File::open("null.database").unwrap();
+    let file = File::open(reader).unwrap();
     let mut reader = EasyReader::new(file).unwrap();
     // Generate index (optional)
     reader.build_index();
@@ -78,44 +75,48 @@ pub async fn get_value_for_key(
     }
 
     // Repeat process by seeking back by chunk_size again.;
-    HttpResponse::Ok().body("Key not found")
+    return HttpResponse::Ok().body("Key not found");
 }
 
 #[post("/{key}")]
 pub async fn put_value_for_key(
-    file_mutex: Data<RwLock<bool>>,
+    file_mutex: Data<RwLock<&str>>,
     web::Path(key): web::Path<String>,
     req_body: String
 ) -> impl Responder {
-    let _writer = file_mutex.write();
+    let writer = file_mutex.write().unwrap();
     let mut file = OpenOptions::new()
         .write(true)
         .append(true)
-        .open("null.database")
+        .open(*writer)
         .unwrap();  
 
     if let Err(e) = writeln!(file,"{}:{}",key, req_body) {
         eprintln!("Couldn't write to file: {}", e);
+        return HttpResponse::InternalServerError();
     }
 
-    HttpResponse::Ok().body("It is saved... to disk!!!")
+    return HttpResponseBuilder::from(HttpResponse::Ok().body("It is saved... to disk!!!"));
 }
 
 #[delete("/{key}")]
 pub async fn delete_value_for_key(
-    file_mutex: Data<RwLock<bool>>,
+    file_mutex: Data<RwLock<&str>>,
     web::Path(key): web::Path<String>
 ) -> impl Responder {
+
+    let writer = file_mutex.write().unwrap();
     let mut file = OpenOptions::new()
         .write(true)
         .append(true)
-        .open("null.database")
+        .open(*writer)
         .unwrap();
 
     if let Err(e) = writeln!(file,"{}:{}",key, TOMBSTONE) {
         eprintln!("Couldn't write to file: {}", e);
+        return HttpResponse::InternalServerError();
     }
 
-    HttpResponse::Ok().body("It has been deleted!")
+    return HttpResponseBuilder::from(HttpResponse::Ok().body("It has been deleted!"));
 }
 

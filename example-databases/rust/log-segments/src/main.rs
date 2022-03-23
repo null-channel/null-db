@@ -130,7 +130,8 @@ pub async fn put_value_for_key(
         eprintln!("Couldn't write to file: {}", e);
     }
 
-    HttpResponse::Ok().body("It is saved, no log file needed")
+    //HttpResponse::Ok().body("It is saved, no log file needed")
+    HttpResponse::NotImplemented()
 }
 
 #[delete("/{key}")]

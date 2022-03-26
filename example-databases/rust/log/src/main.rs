@@ -26,7 +26,7 @@ use std::{
 };
 use std::sync::RwLock; // read heavy better for sure -- probably better period.
 
-const TOMBSTONE: &'static str = "-tombstone-";
+const TOMBSTONE: &'static str = "~tombstone~";
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -67,7 +67,6 @@ pub async fn get_value_for_key(
                 if value == TOMBSTONE {
                     return HttpResponse::Ok().body("Key not found");
                 }
-                
                 return HttpResponse::Ok().body(value);
             }
         }
@@ -75,7 +74,7 @@ pub async fn get_value_for_key(
     }
 
     // Repeat process by seeking back by chunk_size again.;
-    return HttpResponse::Ok().body("Key not found");
+    return HttpResponse::NotFound().body("");
 }
 
 #[post("/{key}")]
@@ -117,6 +116,6 @@ pub async fn delete_value_for_key(
         return HttpResponse::InternalServerError();
     }
 
-    return HttpResponseBuilder::from(HttpResponse::Ok().body("It has been deleted!"));
+    return HttpResponseBuilder::from(HttpResponse::Ok().body("Record Deleted"));
 }
 

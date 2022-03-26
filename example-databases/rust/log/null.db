@@ -1,4 +1,6 @@
-thing:blob
-another_thin:not-only-this-yeah-buddymarek:thing
-marek:thing
-something:nothing
+marek:is a fun value
+marek:new value for key marek
+key_2:new value for key marek
+something_else:yet another value
+
+marek:~tombstone~

@@ -65,16 +65,16 @@ pub async fn get_value_for_key(
             if split[0] == key {
                 let value = split[1].to_string().clone();
                 if value == TOMBSTONE {
-                    return HttpResponse::Ok().body("Key not found");
+                    return HttpResponseBuilder::from(HttpResponse::Ok().body("Key not found"));
                 }
-                return HttpResponse::Ok().body(value);
+                return HttpResponseBuilder::from(HttpResponse::Ok().body(value));
             }
         }
         println!("{}", line);
     }
 
     // Repeat process by seeking back by chunk_size again.;
-    return HttpResponse::NotFound().body("");
+    return HttpResponseBuilder::from(HttpResponse::NotFound().body(""));
 }
 
 #[post("/{key}")]
@@ -83,6 +83,7 @@ pub async fn put_value_for_key(
     web::Path(key): web::Path<String>,
     req_body: String
 ) -> impl Responder {
+
     let writer = file_mutex.write().unwrap();
     let mut file = OpenOptions::new()
         .write(true)

@@ -18,3 +18,8 @@ type GetRequest struct {
 type DeleteRequest struct {
 	Key string `json:"key"`
 }
+
+
+func NewDbServer(l *log.Logger) *DbServer{
+	return &DbServer{l}
+}

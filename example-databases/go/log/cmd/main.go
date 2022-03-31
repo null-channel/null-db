@@ -30,18 +30,4 @@ func main() {
 		}
 	})
 	DB := db.NewDB(l, logfile)
-	err := DB.Set("hello", "world")
-	if err != nil {
-		l.Println(err)
-	}
-
-	err = DB.Set("hello", "man")
-	if err != nil {
-		l.Println(err)
-	}
-	str, err := DB.Get("hello")
-	if err != nil {
-		l.Println(err)
-	}
-	l.Println(str)
 }

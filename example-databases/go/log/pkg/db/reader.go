@@ -86,3 +86,37 @@ func (db *DB) Set(k, v string) error {
 	}
 	return nil
 }
+
+func (db *DB) Delete(K string) (string, error) {
+	file, err := os.Open(db.logfile)
+	if err != nil {
+		db.l.Printf("an error occured opening the file: %s", err.Error())
+		return "", err
+	}
+	db.mu.Lock()
+	scanner := bufio.NewScanner(file)
+	scanner.Split(bufio.ScanLines)
+	var data []string
+	for scanner.Scan() {
+		data = append(data, scanner.Text())
+	}
+	ReverseSlice(data)
+	file.Close()
+	for _, kv := range data {
+		key := strings.Split(kv, ":")
+		if key[0] == K {
+			file, err := os.OpenFile(db.logfile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+			if err != nil {
+				return "", err
+			}
+			text := fmt.Sprintf("%s:%s\n", K, Tombstone)
+			_, err = file.WriteString(text)
+			if err != nil {
+				return "", err
+			}
+
+		}
+	}
+	defer db.mu.Unlock()
+	return "", ErrorKeyNotFound
+}

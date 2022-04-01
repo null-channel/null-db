@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 )
@@ -29,18 +28,13 @@ func NewDB(l *log.Logger, lf string) *DB {
 	}
 }
 
-func ReverseSlice(data interface{}) {
-	value := reflect.ValueOf(data)
-	if value.Kind() != reflect.Slice {
-		log.Fatal("invalid data type")
+func ReverseSlice(data []string) []string {
+	m := len(data) - 1
+	var out = []string{}
+	for i := m; i >= 0; i-- {
+		out = append(out, data[i])
 	}
-	valueLen := value.Len()
-	for i := 0; i <= int((valueLen-1)/2); i++ {
-		reverseIndex := valueLen - 1 - i
-		tmp := value.Index(reverseIndex).Interface()
-		value.Index(reverseIndex).Set(value.Index(i))
-		value.Index(i).Set(reflect.ValueOf(tmp))
-	}
+	return out
 }
 
 func (db *DB) Get(K string) (string, error) {
@@ -58,7 +52,7 @@ func (db *DB) Get(K string) (string, error) {
 	for scanner.Scan() {
 		data = append(data, scanner.Text())
 	}
-	ReverseSlice(data)
+	data = ReverseSlice(data)
 	for _, kv := range data {
 		key := strings.Split(kv, ":")
 		if key[1] == Tombstone {

@@ -421,5 +421,3 @@ impl<R: Read + Seek> EasyReader<R> {
     }
 }
 
-#[cfg(test)]
-mod tests;

@@ -2,6 +2,7 @@ use actix_web::{
     get, 
     post, 
     delete, 
+    dev::HttpResponseBuilder,
     web::{self, Data}, 
     App, 
     Responder, 
@@ -33,7 +34,8 @@ use std::io::BufReader;
 use std::sync::RwLock; // read heavy -- probably better period.
 mod file_compactor;
 
-const TOMBSTONE: &'static str = "-tombstone-";
+const TOMBSTONE: &'static str = "~tombstone~";
+const MAX_FILE_SIZE: &'static i32 = &(1 * 1024 * 1024);
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {    
@@ -131,7 +133,7 @@ pub async fn put_value_for_key(
     }
 
     //HttpResponse::Ok().body("It is saved, no log file needed")
-    HttpResponse::NotImplemented()
+    return HttpResponse::NotImplemented().body("");
 }
 
 #[delete("/{key}")]

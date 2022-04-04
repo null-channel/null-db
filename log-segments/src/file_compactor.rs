@@ -45,13 +45,29 @@ pub fn start_compaction(rx: Receiver<i32>) {
 
 }
 
-fn compactor() {
-    let paths = std::fs::read_dir("./").unwrap();
+fn get_all_files_in_dir(path: String, ext: String) -> Result<Vec<String>> {
+    let paths = std::fs::read_dir(path)?;
+    let mut file_paths = paths.into_iter().flat_map(|x| {
+        match x {
+            Ok(y) => {
+                if get_extension_from_filename(y.file_name().to_str()?) == Some(&ext) {
+                    return Some(y.file_name().into_string().unwrap());
+                }
+            }
+            Err(_) => return None
+        }
+        return None;
+    }).collect::<Vec<String>>();
+    return Ok(file_paths);
+}
+
+async fn compactor() -> Result<()> {
+    let paths = std::fs::read_dir("./")?;
 
     let mut pack_files = paths.into_iter().flat_map(|x| {
         match x {
             Ok(y) => {
-                if get_extension_from_filename(y.file_name().to_str().unwrap()) == Some("npack") {
+                if get_extension_from_filename(y.file_name().to_str()?) == Some("npack") {
                     return Some(y.file_name().into_string().unwrap());
                 }
             }
@@ -60,11 +76,11 @@ fn compactor() {
         return None;
     }).collect::<Vec<String>>();
 
-    let new_pack_files_dir = std::fs::read_dir("./").unwrap();
+    let new_pack_files_dir = std::fs::read_dir("./")?;
     let mut new_pack_files = new_pack_files_dir.into_iter().flat_map(|x| {
         match x {
             Ok(y) => {
-                if get_extension_from_filename(y.file_name().to_str().unwrap()) == Some("nnpack") {
+                if get_extension_from_filename(y.file_name().to_str()?) == Some("nnpack") {
                     println!("new pack file found");
                     return Some(y.file_name().into_string().unwrap());
                 }
@@ -97,7 +113,7 @@ fn compactor() {
         let f = BufReader::new(file);
         let lines = f.lines();
         for line in lines {
-            let line_r = line.unwrap();
+            let line_r = line?;
             let split = line_r.split(":").collect::<Vec<&str>>();
             if split.len() == 2 {
                 if !data_map.contains_key(split[0]) {
@@ -124,7 +140,7 @@ fn compactor() {
         let f = BufReader::new(file);
         let lines = f.lines();
         for line in lines {
-            let line_r = line.unwrap();
+            let line_r = line?;
             let split = line_r.split(":").collect::<Vec<&str>>();
             if split.len() == 2 {
                 if !data_map.contains_key(split[0]) {
@@ -139,8 +155,7 @@ fn compactor() {
     
     let start = SystemTime::now();
     let since_the_epoch = start
-        .duration_since(UNIX_EPOCH)
-        .unwrap();
+        .duration_since(UNIX_EPOCH).unwrap();
 
     // write compacted data
     let mut i = 0;
@@ -195,6 +210,7 @@ fn compactor() {
         std::fs::remove_file(file_path);
     }
 
+    return Ok(())
 }
  
 

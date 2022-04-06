@@ -35,7 +35,7 @@ func main() {
 	DB := db.NewDB(l, logfile)
 	loghandler := server.NewDbServer(l, DB)
 	router := mux.NewRouter()
-	router.HandleFunc("/get", loghandler.GetHandler).Methods(http.MethodPost)
+	router.HandleFunc("/get/{key}", loghandler.GetHandler).Methods(http.MethodGet)
 	router.HandleFunc("/set", loghandler.InsertHandler).Methods(http.MethodPost)
 	router.HandleFunc("/pop", loghandler.DeleteHandler).Methods(http.MethodPost)
 	l.Println("starting server on port 4000")

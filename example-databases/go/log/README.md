@@ -38,7 +38,7 @@ curl -d '{"key":"hey","value":"world"}' -H "Content-Type: application/json" http
 ### retreiving a value 
 
 ```shell
-curl -d '{"key":"hey"}' -H "Content-Type: application/json" http://localhost:4000/get  
+curl http://localhost:4000/get/key  
 ```
 
 ### Deleting a value 

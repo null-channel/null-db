@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/gorilla/mux"
 	"github.com/null-channel/null-db/pkg/db"
 )
 
@@ -53,16 +54,16 @@ func (s *DbServer) InsertHandler(rw http.ResponseWriter, r *http.Request) {
 
 func (s *DbServer) GetHandler(rw http.ResponseWriter, r *http.Request) {
 	s.l.Println("received Get request")
-	req := GetRequest{}
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		s.l.Printf("unable to process get request for key %s", req.Key)
-		http.Error(rw, "unable to process request", http.StatusBadRequest)
+	vars := mux.Vars(r)
+	key := vars["key"]
+	if key == "" {
+		s.l.Println("unable to process get request , no key supplied", )
+		http.Error(rw, "a key must be supplied", http.StatusBadRequest)
 		return
 
 	}
-	s.l.Printf("obtaining value for key %s", req.Key)
-	val, err := s.logdb.Get(req.Key)
+	s.l.Printf("obtaining value for key %s", key)
+	val, err := s.logdb.Get(key)
 	if err != nil {
 		s.l.Println("unable to process request")
 		http.Error(rw, fmt.Sprintf("%s", err), 404)

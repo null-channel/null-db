@@ -5,6 +5,7 @@ use std::sync::mpsc::TryRecvError;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::mem;
 use std::io::BufReader;
 use std::ffi::OsString;
 use std::io::BufRead;
@@ -14,6 +15,7 @@ use std::io::prelude::*;
 use std::{thread, time};
 use std::{
     fs::{
+        self,
         File,
         write,
         copy
@@ -25,6 +27,10 @@ use std::{
 };
 use std::fs::OpenOptions;
 use std::path::Path;
+use super::record;
+
+pub const SEGMENT_FILE_EXT: &'static str = "nullsegment";
+const MAX_FILE_SIZE: &'static usize = &(1 * 1024 * 1024); //1mb block
 
 pub fn start_compaction(rx: Receiver<i32>) {
 
@@ -61,98 +67,93 @@ fn get_all_files_in_dir(path: String, ext: String) -> Result<Vec<String>> {
     return Ok(file_paths);
 }
 
-async fn compactor() -> Result<()> {
+pub async fn compactor() -> Result<()> {
     let paths = std::fs::read_dir("./")?;
 
-    let mut pack_files = paths.into_iter().flat_map(|x| {
-        match x {
-            Ok(y) => {
-                if get_extension_from_filename(y.file_name().to_str()?) == Some("npack") {
-                    return Some(y.file_name().into_string().unwrap());
-                }
-            }
-            Err(_) => return None
-        }
-        return None;
-    }).collect::<Vec<String>>();
-
-    let new_pack_files_dir = std::fs::read_dir("./")?;
-    let mut new_pack_files = new_pack_files_dir.into_iter().flat_map(|x| {
-        match x {
-            Ok(y) => {
-                if get_extension_from_filename(y.file_name().to_str()?) == Some("nnpack") {
-                    println!("new pack file found");
-                    return Some(y.file_name().into_string().unwrap());
-                }
-            }
-            Err(_) => return None
-        }
-        return None;
-    }).collect::<Vec<String>>();
+    let mut segment_files = get_all_files_in_dir("./".to_owned(),SEGMENT_FILE_EXT.to_owned())?;
 
     /*
     * unstable is faster, but could reorder "same" values. 
     * We will not have same values
     * it does not matter even if we did
+    * file names look like this:
+    * [gen]-[time].nseg
     */
-    pack_files.sort_unstable();
+    segment_files.sort_unstable();
 
     // pack all old pack files
-    let mut data_map = HashMap::new();
-    let mut to_delete = HashSet::new();
+    let mut data = &mut HashSet::new();
+    let mut latest_generation = 0;
+    let mut compacted_files: Vec<String> = Vec::new();
     // Collect all new pack files first as these will cary the tombstone and should
     // be removed from all the
-    for file_path in new_pack_files.clone() {
+    let mut iter = segment_files.into_iter();
+    while let Some(file_path) = iter.next() {
+    //for file_path in pack_files.clone() {
 
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(true)
-            .write(true)
-            .open(file_path)
+            .write(false)
+            .open(file_path.clone())
             .expect("db pack file doesn't exist.");
 
+        //file names: [gen]-[time].nullsegment
+        let path = file_path.clone();
+        let file_name_breakdown = path.split("-").collect::<Vec<&str>>();
+        latest_generation = file_name_breakdown[0].parse().unwrap();
+
+        // Read file into buffer reader
         let f = BufReader::new(file);
+        // break it into lines
         let lines = f.lines();
+        // insert each line into our set.
         for line in lines {
-            let line_r = line?;
-            let split = line_r.split(":").collect::<Vec<&str>>();
-            if split.len() == 2 {
-                if !data_map.contains_key(split[0]) {
-                    if split[1] == "-tombstone-" {
-                        //Add this to the set to be deleted
-                        to_delete.insert(split[0].to_string());
-                    } else {
-                        // Addthis to the data to be compacted
-                        data_map.insert(split[0].to_string(),split[1].to_string());
-                    }
+            if let Ok(l) = line {
+                // need to use our hashing object so only the "key" is looked at. pretty cool.
+                // have no idea why i'm so excited about this one single bit.
+                // this is what makes software engineering fun.
+                if let Some(record) = record::Record::new(l) {
+                    data.insert(record);
                 }
             }
         }
-    }
 
-    for file_path in pack_files.clone() {
+        compacted_files.push(file_path.clone());
 
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(file_path)
-            .expect("db pack file doesn't exist.");
+        // If we are over our max file size, lets flush to disk
+        // for now, we will just check at the end of each file.
+        if mem::size_of_val(&data) > *MAX_FILE_SIZE {
+            
+            // Calculate file generation
+            let file_gen = latest_generation + 1;
 
-        let f = BufReader::new(file);
-        let lines = f.lines();
-        for line in lines {
-            let line_r = line?;
-            let split = line_r.split(":").collect::<Vec<&str>>();
-            if split.len() == 2 {
-                if !data_map.contains_key(split[0]) {
-                    if !to_delete.contains(split[0]) {
-                        data_map.insert(split[0].to_string(),split[1].to_string());
-                    }
+            // current time
+            let start = SystemTime::now();
+            let since_the_epoch = start
+                .duration_since(UNIX_EPOCH).unwrap();
+
+            // Create new file
+            let mut new_file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(format!("{}-{:?}.nullsegment",file_gen,since_the_epoch))
+                .unwrap(); 
+            
+            // interesting we don't "care" about the order now
+            // becuase all records are unique
+            for r in data.iter() {
+                if let Err(e) = writeln!(new_file,"{}\n",r.get_string()) {
+                    eprintln!("Couldn't write to file: {}", e);
                 }
+            }
+            
+            // delete files saved to disk
+            for f in &compacted_files {
+                fs::remove_file(f)?;
             }
         }
     }
-
-    
+   /*
     let start = SystemTime::now();
     let since_the_epoch = start
         .duration_since(UNIX_EPOCH).unwrap();
@@ -209,8 +210,9 @@ async fn compactor() -> Result<()> {
     for file_path in new_pack_files {
         std::fs::remove_file(file_path);
     }
-
+    */
     return Ok(())
+
 }
  
 

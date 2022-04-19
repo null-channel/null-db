@@ -1,3 +1,4 @@
+use std::mem;
 use actix_web::{
     get, 
     post, 
@@ -22,28 +23,39 @@ use std::{
     fs::{
         File,
         write,
-        copy
+        copy 
     },
     io::{
         self,
         Error
     }
 };
+use clap::Parser;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::BufReader;
 use std::sync::RwLock; // read heavy -- probably better period.
 mod file_compactor;
+mod record;
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    #[clap(short,long)]
+    compaction: bool,
+}
 
 const TOMBSTONE: &'static str = "~tombstone~";
-const MAX_FILE_SIZE: &'static i32 = &(1 * 1024 * 1024);
 
 #[actix_web::main]
-async fn main() -> std::io::Result<()> {    
+async fn main() -> std::io::Result<()> {  
+    let args = Args::parse();
+    
+    if args.compaction {
+        let (tx, rx) = mpsc::channel();
+        file_compactor::start_compaction(rx);
+    }
+
     let file_mutex = Data::new(RwLock::new(false));
-
-    let (tx, rx) = mpsc::channel();
-    file_compactor::start_compaction(rx);
-
     HttpServer::new(move || {
         App::new()
             .app_data(file_mutex.clone())
@@ -109,8 +121,10 @@ pub async fn put_value_for_key(
         let since_the_epoch = start
             .duration_since(UNIX_EPOCH)
             .unwrap();
-        std::fs::copy("null.database", format!("{:?}.{}", since_the_epoch, "nnpack")).unwrap();
+        
+        std::fs::copy("null.database", format!("{:?}.{}", since_the_epoch, file_compactor::SEGMENT_FILE_EXT)).unwrap();
 
+        // delete all old data and write new key
         let mut tun = OpenOptions::new()
             .write(true)
             .truncate(true)
@@ -153,5 +167,13 @@ pub async fn delete_value_for_key(
     }
     
     HttpResponse::Ok().body("It has been deleted!")
+}
+
+#[get("/compact")]
+pub async fn compact_data() -> impl Responder {
+
+    file_compactor::compactor();
+
+    HttpResponse::Ok()
 }
 

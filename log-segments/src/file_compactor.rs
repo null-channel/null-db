@@ -32,7 +32,7 @@ use super::record;
 pub const SEGMENT_FILE_EXT: &'static str = "nullsegment";
 const MAX_FILE_SIZE: &'static usize = &(1 * 1024 * 1024); //1mb block
 
-pub fn start_compaction(rx: Receiver<i32>) {
+pub async fn start_compaction(rx: Receiver<i32>) {
 
     thread::spawn(move || loop {
         match rx.try_recv() {
@@ -48,7 +48,6 @@ pub fn start_compaction(rx: Receiver<i32>) {
         println!("Suspending...");
         thread::sleep(time::Duration::from_secs(30));
     });
-
 }
 
 fn get_all_files_in_dir(path: String, ext: String) -> Result<Vec<String>> {
@@ -67,7 +66,7 @@ fn get_all_files_in_dir(path: String, ext: String) -> Result<Vec<String>> {
     return Ok(file_paths);
 }
 
-pub async fn compactor() -> Result<()> {
+pub fn compactor() -> Result<()> {
     let paths = std::fs::read_dir("./")?;
 
     let mut segment_files = get_all_files_in_dir("./".to_owned(),SEGMENT_FILE_EXT.to_owned())?;
@@ -151,7 +150,42 @@ pub async fn compactor() -> Result<()> {
             for f in &compacted_files {
                 fs::remove_file(f)?;
             }
+
+            data.clear();
+            compacted_files.clear();
         }
+    }
+
+    if mem::size_of_val(&data) > 0 {
+            
+        // Calculate file generation
+        let file_gen = latest_generation + 1;
+
+        // current time
+        let start = SystemTime::now();
+        let since_the_epoch = start
+            .duration_since(UNIX_EPOCH).unwrap();
+
+        // Create new file
+        let mut new_file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(format!("{}-{:?}.nullsegment",file_gen,since_the_epoch))
+            .unwrap(); 
+        
+        // interesting we don't "care" about the order now
+        // becuase all records are unique
+        for r in data.iter() {
+            if let Err(e) = writeln!(new_file,"{}\n",r.get_string()) {
+                eprintln!("Couldn't write to file: {}", e);
+            }
+        }
+        
+        // delete files saved to disk
+        for f in &compacted_files {
+            fs::remove_file(f)?;
+        }
+        compacted_files.clear();
     }
    /*
     let start = SystemTime::now();

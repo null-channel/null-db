@@ -122,7 +122,7 @@ pub async fn put_value_for_key(
             .duration_since(UNIX_EPOCH)
             .unwrap();
         
-        std::fs::copy("null.database", format!("{:?}.{}", since_the_epoch, file_compactor::SEGMENT_FILE_EXT)).unwrap();
+        std::fs::copy("null.database", format!("0-{:?}.{}", since_the_epoch, file_compactor::SEGMENT_FILE_EXT)).unwrap();
 
         // delete all old data and write new key
         let mut tun = OpenOptions::new()
@@ -172,8 +172,12 @@ pub async fn delete_value_for_key(
 #[get("/compact")]
 pub async fn compact_data() -> impl Responder {
 
-    file_compactor::compactor();
+    let res = file_compactor::compactor();
 
-    HttpResponse::Ok()
+    if let Ok(_) = res {
+        return HttpResponse::Ok();
+    }
+
+    HttpResponse::InternalServerError()
 }
 

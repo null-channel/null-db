@@ -51,6 +51,11 @@ enum Commands {
         duration: i32,
         #[clap(long, default_value = "localhost")]
         host: String,
+    },
+
+    Compact {
+        #[clap(long, default_value = "localhost")]
+        host: String,
     }
 
 }
@@ -106,6 +111,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Bench {records,duration,host} => {
             println!("benchmarking database");
             benchmark(*records,*duration,host.to_string());
+        }
+
+        Commands::Compact {host} => {
+            println!("Making a compation request!");
+            let resp = reqwest::get(format!("http://{}:8080/{}\n",host, "compact"))
+            .await?;
+
         }
     }
 

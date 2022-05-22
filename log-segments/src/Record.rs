@@ -1,7 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Debug)]
 pub struct Record {
     key: String,
     value: String,
@@ -11,6 +11,20 @@ pub struct Record {
 impl Hash for Record {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.key.hash(state);
+    }
+}
+
+impl Eq for Record {
+    
+}
+
+impl PartialEq for Record {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+
+    fn ne(&self, other: &Self) -> bool {
+        self.key == other.key
     }
 }
 

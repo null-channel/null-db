@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("putting data {}", value);
             let client = reqwest::Client::new();
             let data = value.clone();
-            let resp = client.post(format!("http://{}:8080/{}\n",host, key))
+            let resp = client.post(format!("http://{}:8080/{}/{}\n",host,"v1/data", key))
                 .body(data)
                 .send()
                 .await?
@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Get { key , host} => {
             println!("getting data for key {}", key);
-            let resp = reqwest::get(format!("http://{}:8080/{}\n",host, key))
+            let resp = reqwest::get(format!("http://{}:8080/{}/{}\n",host,"v1/data", key))
             .await?
             .text()
             .await?;
@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Delete { key, host} => {
             println!("deleting data for key {}", key);
             let client = reqwest::Client::new();
-            let resp = client.delete(format!("http://{}:8080/{}\n",host, key)).send()
+            let resp = client.delete(format!("http://{}:8080/{}/{}\n",host,"v1/data", key)).send()
             .await?
             .text()
             .await?;
@@ -115,7 +115,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Compact {host} => {
             println!("Making a compation request!");
-            let resp = reqwest::get(format!("http://{}:8080/{}\n",host, "compact"))
+            let resp = reqwest::get(format!("http://{}:8080/{}\n",host, "v1/management/compact"))
+            .await?
+            .text()
             .await?;
 
         }

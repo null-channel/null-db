@@ -67,8 +67,6 @@ fn get_all_files_in_dir(path: String, ext: String) -> Result<Vec<String>> {
 }
 
 pub fn compactor() -> Result<()> {
-    let paths = std::fs::read_dir("./")?;
-
     let mut segment_files = get_all_files_in_dir("./".to_owned(),SEGMENT_FILE_EXT.to_owned())?;
 
     /*
@@ -81,13 +79,14 @@ pub fn compactor() -> Result<()> {
     segment_files.sort_unstable();
 
     // pack all old pack files
-    let mut data = &mut HashSet::new();
+    let data: &mut HashSet<record::Record> = &mut HashSet::new();
     let mut latest_generation = 0;
     let mut compacted_files: Vec<String> = Vec::new();
     // Collect all new pack files first as these will cary the tombstone and should
     // be removed from all the
     let mut iter = segment_files.into_iter();
     while let Some(file_path) = iter.next() {
+        println!("{}",file_path);
     //for file_path in pack_files.clone() {
 
         let file = OpenOptions::new()
@@ -141,7 +140,7 @@ pub fn compactor() -> Result<()> {
             // interesting we don't "care" about the order now
             // becuase all records are unique
             for r in data.iter() {
-                if let Err(e) = writeln!(new_file,"{}\n",r.get_string()) {
+                if let Err(e) = writeln!(new_file,"{}",r.get_string()) {
                     eprintln!("Couldn't write to file: {}", e);
                 }
             }
@@ -176,7 +175,7 @@ pub fn compactor() -> Result<()> {
         // interesting we don't "care" about the order now
         // becuase all records are unique
         for r in data.iter() {
-            if let Err(e) = writeln!(new_file,"{}\n",r.get_string()) {
+            if let Err(e) = writeln!(new_file,"{}",r.get_string()) {
                 eprintln!("Couldn't write to file: {}", e);
             }
         }

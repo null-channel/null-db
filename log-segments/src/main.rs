@@ -62,13 +62,14 @@ async fn main() -> std::io::Result<()> {
             .service(get_value_for_key)
             .service(put_value_for_key)
             .service(delete_value_for_key)
+            .service(compact_data)
         })
         .bind("127.0.0.1:8080")?
         .run()
         .await
 }
 
-#[get("/{key}")]
+#[get("/v1/data/{key}")]
 pub async fn get_value_for_key( 
     file_mutex: Data<RwLock<bool>>, 
     web::Path(key): web::Path<String>
@@ -97,7 +98,7 @@ pub async fn get_value_for_key(
     HttpResponse::Ok().body("value not found")
 }
 
-#[post("/{key}")]
+#[post("/v1/data/{key}")]
 pub async fn put_value_for_key(
     file_mutex: Data<RwLock<bool>>, 
     web::Path(key): web::Path<String>,
@@ -150,7 +151,7 @@ pub async fn put_value_for_key(
     return HttpResponse::NotImplemented().body("");
 }
 
-#[delete("/{key}")]
+#[delete("v1/data/{key}")]
 pub async fn delete_value_for_key(
     file_mutex: Data<RwLock<bool>>, 
     web::Path(key): web::Path<String>
@@ -169,9 +170,9 @@ pub async fn delete_value_for_key(
     HttpResponse::Ok().body("It has been deleted!")
 }
 
-#[get("/compact")]
+#[get("/v1/management/compact")]
 pub async fn compact_data() -> impl Responder {
-
+    println!("compacting!");
     let res = file_compactor::compactor();
 
     if let Ok(_) = res {

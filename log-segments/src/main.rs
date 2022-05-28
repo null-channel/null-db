@@ -13,6 +13,7 @@ use actix_web::{
 #[macro_use]
 extern crate lazy_static;
 mod file_reader;
+mod Record;
 //use easy_reader::EasyReader;
 use file_reader::EasyReader;
 use std::fs::OpenOptions;

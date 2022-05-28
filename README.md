@@ -2,6 +2,10 @@
 
 Here are a collection of databases created for learning and education. These databases look to show how popular databases like mongo, dynamo, postgress and cassandra work, and should help expand your understanding and knowledge of not only how it is done, but why it effects you.
 
+Where is the work?! well right now the majority of the work is being done in "episode" branches to make it easy to follow along with. so check thoughs out if you are interested, they each have their own video on the technique used.
+
+Once we are further down the line, this main branch will morph into the main database.
+
 ## This is WIP
 
 I am working on this in my spare time. please, consume it at your own risk. :) if you would like the more guided approach then please watch my video series on it.

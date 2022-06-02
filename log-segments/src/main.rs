@@ -57,25 +57,28 @@ pub async fn get_value_for_key(
     file_mutex: Data<RwLock<bool>>, 
     web::Path(key): web::Path<String>
 ) -> impl Responder {
-    let _reader = file_mutex.read();
-    let file = File::open("null.database").unwrap();
-    let mut reader = EasyReader::new(file).unwrap();
-    // Generate index (optional)
-    reader.build_index();
-    reader.eof();
-    while let Some(line) = reader.prev_line().unwrap() {
-        let split = line.split(":").collect::<Vec<&str>>();
-        if split.len() == 2 {
-            if split[0] == key {
-                let val = split[1].to_string().clone();
-                if val == TOMBSTONE {
-                    return HttpResponse::Ok().body("value not found");
+    { // Scope so read lock drops after finished with the "main" file.
+        let _reader = file_mutex.read();
+        let file = File::open("null.database").unwrap();
+        let mut reader = EasyReader::new(file).unwrap();
+        // Generate index (optional)
+        let _ = reader.build_index();
+        reader.eof();
+        while let Some(line) = reader.prev_line().unwrap() {
+            let split = line.split(":").collect::<Vec<&str>>();
+            if split.len() == 2 {
+                if split[0] == key {
+                    let val = split[1].to_string().clone();
+                    if val == TOMBSTONE {
+                        return HttpResponse::Ok().body("value not found");
+                    }
+                    return HttpResponse::Ok().body(split[1].to_string().clone());
                 }
-                return HttpResponse::Ok().body(split[1].to_string().clone());
             }
+            println!("{}", line);
         }
-        println!("{}", line);
     }
+    // Read lock not needed anymore
 
     // We did not find it in the main writable file. Lets check all the other ones now!
     let mut segment_files = get_all_files_in_dir("./".to_owned(),LOG_SEGMENT_EXT.to_owned()).unwrap();
@@ -142,12 +145,12 @@ pub async fn put_value_for_key(
 ) -> impl Responder {
     // Locking lets us protect the integraty of our file for now
     let _write_lock = file_mutex.write();
-
-    if let(e) = write_value_to_log(format!("{}:{}", key,req_body )) {
-        return HttpResponse::InternalServerError();
+    
+    let res = write_value_to_log(format!("{}:{}", key,req_body ));
+    match res {
+        Err(_) => HttpResponse::InternalServerError(),
+        Ok(_) => HttpResponse::Ok(),
     }
-  
-    HttpResponse::Ok()
 }
 
 #[delete("v1/data/{key}")]
@@ -157,11 +160,12 @@ pub async fn delete_value_for_key(
 ) -> impl Responder {
     let _write_lock = file_mutex.write();
 
-    if let(e) = write_value_to_log(format!("{}:{}", key, TOMBSTONE)) {
-        return HttpResponse::InternalServerError();
+    let res = write_value_to_log(format!("{}:{}", key, TOMBSTONE));
+
+    match res {
+        Err(_) => HttpResponse::InternalServerError(),
+        Ok(_) => HttpResponse::Ok(),
     }
-  
-    return HttpResponse::Ok();
 }
 
 
@@ -213,7 +217,7 @@ fn write_value_to_log(value: String) -> Result<(), io::Error> {
 
 fn get_all_files_in_dir(path: String, ext: String) -> Result<Vec<String>,Box<Error>> {
     let paths = std::fs::read_dir(path)?;
-    let mut file_paths = paths.into_iter().flat_map(|x| {
+    let file_paths = paths.into_iter().flat_map(|x| {
         match x {
             Ok(y) => {
                 if get_extension_from_filename(y.file_name().to_str()?) == Some(&ext) {

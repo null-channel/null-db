@@ -60,27 +60,17 @@ pub async fn get_value_for_key(
     { // Scope so read lock drops after finished with the "main" file.
         let _reader = file_mutex.read();
         let file = File::open("null.database").unwrap();
-        let mut reader = EasyReader::new(file).unwrap();
-        // Generate index (optional)
-        let _ = reader.build_index();
-        reader.eof();
-        while let Some(line) = reader.prev_line().unwrap() {
-            let split = line.split(":").collect::<Vec<&str>>();
-            if split.len() == 2 {
-                if split[0] == key {
-                    let val = split[1].to_string().clone();
-                    if val == TOMBSTONE {
-                        return HttpResponse::Ok().body("value not found");
-                    }
-                    return HttpResponse::Ok().body(split[1].to_string().clone());
-                }
-            }
-            println!("{}", line);
+
+        let res = check_file_for_key(key.clone(), file);
+        match res {
+            Ok(value) => return HttpResponse::Ok().body(value.clone()),
+            Err(NullDbReadError::ValueDeleted) => return HttpResponse::Ok().body("value not found"),
+            Err(_) => (), // All other errors mean we need to check the segments!
         }
     }
     // Read lock not needed anymore
 
-    // We did not find it in the main writable file. Lets check all the other ones now!
+      // We did not find it in the main writable file. Lets check all the other ones now!
     let mut segment_files = get_all_files_in_dir("./".to_owned(),LOG_SEGMENT_EXT.to_owned()).unwrap();
 
     /*

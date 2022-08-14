@@ -13,6 +13,7 @@ use std::ffi::OsStr;
 use std::io::{Write, Result};
 use std::io::prelude::*;
 use std::{thread, time};
+use std::error::Error;
 use std::{
     fs::{
         self,
@@ -21,8 +22,7 @@ use std::{
         copy
     },
     io::{
-        self,
-        Error
+        self
     }
 };
 use std::fs::OpenOptions;
@@ -179,80 +179,8 @@ pub fn compactor() -> Result<()> {
                 eprintln!("Couldn't write to file: {}", e);
             }
         }
-        
-        // delete files saved to disk
-        for f in &compacted_files {
-            fs::remove_file(f)?;
-        }
-        compacted_files.clear();
     }
-   /*
-    let start = SystemTime::now();
-    let since_the_epoch = start
-        .duration_since(UNIX_EPOCH).unwrap();
-
-    // write compacted data
-    let mut i = 0;
-    let mut leftover = data_map.len()%64;
-    let data = data_map
-        .iter()
-        .map(|x| {
-            let (key, value) = x;
-            i = i + 1;
-            return format!("{}:{}",key,value)
-        }).collect::<Vec<String>>();
-    while i < data_map.len() && (i + 64) < data_map.len() {
-        let to_write = &data[i..(i+64)];
-        // use i to make files sortable by "youngest" but named differently
-        // only works with a single threaded compacter.
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .open(format!("{:?}{}.{}", since_the_epoch,i, "npack"))
-            .unwrap();
-        for line in to_write {
-            if let Err(e) = writeln!(file,"{}",line) {
-                eprintln!("Couldn't write to file: {}", e);
-            }
-        }
-    }
-
-    let start = data_map.len() - leftover;
-
-    let to_write = &data[start..data_map.len()];
-    // use i to make files sortable by "youngest" but named differently
-    // only works with a single threaded compacter.
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(format!("{:?}{}.{}", since_the_epoch,i, "npack"))
-        .unwrap();
-    for line in to_write {
-        if let Err(e) = writeln!(file,"{}",line) {
-            eprintln!("Couldn't write to file: {}", e);
-        }
-    }
-
-
-    // delete old npack files
-    for file_path in pack_files {
-        std::fs::remove_file(file_path);
-    }
-
-    // delete old npack files
-    for file_path in new_pack_files {
-        std::fs::remove_file(file_path);
-    }
-    */
-    return Ok(())
-
-}
- 
-
-fn get_extension_from_filename(filename: &str) -> Option<&str> {
-    Path::new(filename)
-        .extension()
-        .and_then(OsStr::to_str)
+    return Ok(());
 }
 
 fn get_generation_from_filename(filename: &str) -> &str {
@@ -263,3 +191,8 @@ fn get_generation_from_filename(filename: &str) -> &str {
     return split[0];
 }
 
+fn get_extension_from_filename(filename: &str) -> Option<&str> {
+    Path::new(filename)
+        .extension()
+        .and_then(OsStr::to_str)
+}

@@ -24,6 +24,8 @@ use std::{
 }; // read heavy -- probably better period.
 mod file_compactor;
 mod record;
+mod utils;
+mod errors;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -71,7 +73,7 @@ pub async fn get_value_for_key(
         let res = check_file_for_key(key.clone(), file);
         match res {
             Ok(value) => return HttpResponse::Ok().body(value.clone()),
-            Err(NullDbReadError::ValueDeleted) => {
+            Err(errors::NullDbReadError::ValueDeleted) => {
                 return HttpResponse::Ok().body("value not found")
             }
             Err(_) => (), // All other errors mean we need to check the segments!
@@ -81,7 +83,7 @@ pub async fn get_value_for_key(
 
     // We did not find it in the main writable file. Lets check all the other ones now!
     let mut segment_files =
-        get_all_files_in_dir("./".to_owned(), LOG_SEGMENT_EXT.to_owned()).unwrap();
+        utils::get_all_files_in_dir("./".to_owned(), LOG_SEGMENT_EXT.to_owned()).unwrap();
 
     /*
     * unstable is faster, but could reorder "same" values.
@@ -103,7 +105,7 @@ pub async fn get_value_for_key(
         let res = check_file_for_key(key.clone(), file);
         match res {
             Ok(value) => return HttpResponse::Ok().body(value.clone()),
-            Err(NullDbReadError::ValueDeleted) => {
+            Err(errors::NullDbReadError::ValueDeleted) => {
                 return HttpResponse::Ok().body("value not found")
             }
             Err(_) => continue, // All other errors (not found in file just mean to check the next file!)
@@ -205,7 +207,7 @@ pub async fn compact_data() -> impl Responder {
 }
 
 
-fn check_file_for_key(key: String, file: File) -> Result<String, NullDbReadError> {
+fn check_file_for_key(key: String, file: File) -> Result<String, errors::NullDbReadError> {
     let mut reader = EasyReader::new(file).unwrap();
     // Generate index (optional)
     reader.build_index();
@@ -218,38 +220,10 @@ fn check_file_for_key(key: String, file: File) -> Result<String, NullDbReadError
         if split[0] == key {
             let val = split[1].to_string().clone();
             if val == TOMBSTONE {
-                return Err(NullDbReadError::ValueDeleted);
+                return Err(errors::NullDbReadError::ValueDeleted);
             }
             return Ok(split[1].to_string().clone());
         }
     }
-    return Err(NullDbReadError::ValueNotFound);
-}
-
-pub enum NullDbReadError {
-    ValueNotFound,
-    ValueDeleted,
-    IOError(io::Error),
-}
-
-fn get_all_files_in_dir(path: String, ext: String) -> Result<Vec<String>,Box<Error>> {
-    let paths = std::fs::read_dir(path)?;
-    let file_paths = paths.into_iter().flat_map(|x| {
-        match x {
-            Ok(y) => {
-                if get_extension_from_filename(y.file_name().to_str()?) == Some(&ext) {
-                    return Some(y.file_name().into_string().unwrap());
-                }
-            }
-            Err(_) => return None
-        }
-        return None;
-    }).collect::<Vec<String>>();
-    return Ok(file_paths);
-}
-
-fn get_extension_from_filename(filename: &str) -> Option<&str> {
-    Path::new(filename)
-        .extension()
-        .and_then(OsStr::to_str)
+    return Err(errors::NullDbReadError::ValueNotFound);
 }

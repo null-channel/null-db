@@ -34,9 +34,6 @@ struct Args {
     compaction: bool,
 }
 
-const TOMBSTONE: &'static str = "~tombstone~";
-const LOG_SEGMENT_EXT: &'static str = "nullsegment";
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Args::parse();
@@ -70,7 +67,7 @@ pub async fn get_value_for_key(
         let _reader = file_mutex.read();
         let file = File::open("null.database").unwrap();
 
-        let res = check_file_for_key(key.clone(), file);
+        let res = utils::check_file_for_key(key.clone(), file);
         match res {
             Ok(value) => return HttpResponse::Ok().body(value.clone()),
             Err(errors::NullDbReadError::ValueDeleted) => {
@@ -83,7 +80,7 @@ pub async fn get_value_for_key(
 
     // We did not find it in the main writable file. Lets check all the other ones now!
     let mut segment_files =
-        utils::get_all_files_in_dir("./".to_owned(), LOG_SEGMENT_EXT.to_owned()).unwrap();
+        utils::get_all_files_in_dir("./".to_owned(), utils::LOG_SEGMENT_EXT.to_owned()).unwrap();
 
     /*
     * unstable is faster, but could reorder "same" values.
@@ -102,7 +99,7 @@ pub async fn get_value_for_key(
 
         let file = File::open(file_path.clone()).unwrap();
 
-        let res = check_file_for_key(key.clone(), file);
+        let res = utils::check_file_for_key(key.clone(), file);
         match res {
             Ok(value) => return HttpResponse::Ok().body(value.clone()),
             Err(errors::NullDbReadError::ValueDeleted) => {
@@ -141,7 +138,7 @@ pub async fn delete_value_for_key(
         .open("null.database")
         .unwrap();
 
-    if let Err(e) = writeln!(file, "{}:{}", key, TOMBSTONE) {
+    if let Err(e) = writeln!(file, "{}:{}", key, utils::TOMBSTONE) {
         eprintln!("Couldn't write to file: {}", e);
     }
 
@@ -166,7 +163,7 @@ fn write_value_to_log(value: String) -> Result<(), io::Error> {
             .duration_since(UNIX_EPOCH)
             .unwrap();
         
-        std::fs::copy("null.database", format!("{:?}.{}", since_the_epoch, LOG_SEGMENT_EXT)).unwrap();
+        std::fs::copy("null.database", format!("0-{:?}.{}", since_the_epoch, utils::LOG_SEGMENT_EXT)).unwrap();
 
         // delete all old data and write new key
         let mut tun = OpenOptions::new()
@@ -207,23 +204,4 @@ pub async fn compact_data() -> impl Responder {
 }
 
 
-fn check_file_for_key(key: String, file: File) -> Result<String, errors::NullDbReadError> {
-    let mut reader = EasyReader::new(file).unwrap();
-    // Generate index (optional)
-    reader.build_index();
-    reader.eof();
-    while let Some(line) = reader.prev_line().unwrap() {
-        let split = line.split(":").collect::<Vec<&str>>();
-        if split.len() != 2 {
-            continue;
-        }
-        if split[0] == key {
-            let val = split[1].to_string().clone();
-            if val == TOMBSTONE {
-                return Err(errors::NullDbReadError::ValueDeleted);
-            }
-            return Ok(split[1].to_string().clone());
-        }
-    }
-    return Err(errors::NullDbReadError::ValueNotFound);
-}
+

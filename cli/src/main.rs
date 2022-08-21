@@ -7,9 +7,8 @@ use std::iter;
 use std::sync::mpsc;
 use std::{thread, time};
 use std::convert::TryInto;
-use rand::Rng;
 use rand::prelude::*;
-use rand::{thread_rng};
+use rand::{thread_rng,Rng};
 use rand::distributions::{Alphanumeric, Uniform, Standard};
 
 mod null_client;
@@ -110,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Bench {records,duration,host} => {
             println!("benchmarking database");
-            benchmark(*records,*duration,host.to_string());
+            benchmark(*records,*duration,host.to_string()).await;
         }
 
         Commands::Compact {host} => {
@@ -128,21 +127,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn benchmark(records: i32, duration: i32, host: String) -> Option<()> {
 
-    let client = null_client::NullClient::new(format!("http://{}:8080/", host).to_string());
+
+    let start = time::Instant::now();
+    let client = null_client::NullClient::new(format!("http://{}:8080/v1/data", host).to_string());
 
     println!("Countdown");
     let now = time::Instant::now();
-    let mut rng = rand::thread_rng();
-    for i in 1..duration {
+    let mut rng = thread_rng();
+    for _i in 0..duration {
         let then = time::Instant::now();
 
         // This loop will run once every second
-        for r in 1..records {
-            let client = reqwest::Client::new();
-                client.post(format!("http://localhost:8080/{}\n", Uuid::new_v4()))
-                    .body(get_random_string(rng.gen::<usize>()))
-                    .send();
-        
+        for r in 0..records {
+            println!("here");
+            let ret = client.post(get_random_string(1), get_random_string(rng.gen_range(5..50))).await;
+            if ret.is_err() {
+                println!("failed: {:?}",ret)
+            }
         }
 
         let dur: u64 = ((time::Instant::now()-then).as_millis()).try_into().unwrap();
@@ -153,7 +154,9 @@ async fn benchmark(records: i32, duration: i32, host: String) -> Option<()> {
             thread::sleep(sleep_dura);
         }
     }
-    
+
+    let end: u64 = ((time::Instant::now()-start).as_millis()).try_into().unwrap();
+    println!("Benchmarking took:{} \nTotal Records Saved: {} \nRecords per MS:{}", end, duration * records, (duration*records) as f64/end as f64);
     return Some(())
 }
 

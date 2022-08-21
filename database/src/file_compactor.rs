@@ -28,9 +28,10 @@ use std::{
 use std::fs::OpenOptions;
 use std::path::Path;
 use super::record;
+use super::utils;
 
 pub const SEGMENT_FILE_EXT: &'static str = "nullsegment";
-const MAX_FILE_SIZE: &'static usize = &(1 * 1024 * 1024); //1mb block
+const MAX_FILE_SIZE: &'static usize = &(1 * 1024); //1kb block
 
 pub async fn start_compaction(rx: Receiver<i32>) {
 
@@ -50,31 +51,14 @@ pub async fn start_compaction(rx: Receiver<i32>) {
     });
 }
 
-fn get_all_files_in_dir(path: String, ext: String) -> Result<Vec<String>> {
-    let paths = std::fs::read_dir(path)?;
-    let mut file_paths = paths.into_iter().flat_map(|x| {
-        match x {
-            Ok(y) => {
-                if get_extension_from_filename(y.file_name().to_str()?) == Some(&ext) {
-                    return Some(y.file_name().into_string().unwrap());
-                }
-            }
-            Err(_) => return None
-        }
-        return None;
-    }).collect::<Vec<String>>();
-    return Ok(file_paths);
-}
-
 pub fn compactor() -> Result<()> {
-    let mut segment_files = get_all_files_in_dir("./".to_owned(),SEGMENT_FILE_EXT.to_owned())?;
+    let mut segment_files = utils::get_all_files_in_dir("./".to_owned(),SEGMENT_FILE_EXT.to_owned())?;
 
     /*
     * unstable is faster, but could reorder "same" values. 
     * We will not have same values
-    * it does not matter even if we did
     * file names look like this:
-    * [gen]-[time].nseg
+    * [generation]-[time].nseg
     */
     segment_files.sort_unstable();
 
@@ -85,7 +69,7 @@ pub fn compactor() -> Result<()> {
     // Collect all new pack files first as these will cary the tombstone and should
     // be removed from all the
     let mut iter = segment_files.into_iter();
-    while let Some(file_path) = iter.next() {
+    while let Some(file_path) = iter.next_back() {
         println!("{}",file_path);
     //for file_path in pack_files.clone() {
 
@@ -98,13 +82,17 @@ pub fn compactor() -> Result<()> {
         //file names: [gen]-[time].nullsegment
         let path = file_path.clone();
         let file_name_breakdown = path.split("-").collect::<Vec<&str>>();
-        latest_generation = file_name_breakdown[0].parse().unwrap();
+        
+        if let Ok(gen) =file_name_breakdown[0].parse() {
+            latest_generation = gen;
+        }
 
         // Read file into buffer reader
         let f = BufReader::new(file);
         // break it into lines
         let lines = f.lines();
         // insert each line into our set.
+        
         for line in lines {
             if let Ok(l) = line {
                 // need to use our hashing object so only the "key" is looked at. pretty cool.
@@ -144,14 +132,18 @@ pub fn compactor() -> Result<()> {
                     eprintln!("Couldn't write to file: {}", e);
                 }
             }
-            
-            // delete files saved to disk
-            for f in &compacted_files {
-                fs::remove_file(f)?;
-            }
 
-            data.clear();
+            for f in &compacted_files {
+                let res = fs::remove_file(f);
+                if res.is_err() {
+                    println!("Failed to delete old file:{:?}", res)
+                }
+            }
+            
+            // These files have been deleted, clear them!
             compacted_files.clear();
+            // This data has been writen and saved to files. Clear it up!
+            data.clear();
         }
     }
 
@@ -180,6 +172,16 @@ pub fn compactor() -> Result<()> {
             }
         }
     }
+
+    println!("deleting old logs");
+    // delete old compacted files now that the new files are saved to disk.
+    for f in &compacted_files {
+        let res = fs::remove_file(f);
+        if res.is_err() {
+            println!("Failed to delete old file:{:?}", res)
+        }
+    }
+
     return Ok(());
 }
 
@@ -187,7 +189,7 @@ fn get_generation_from_filename(filename: &str) -> &str {
     let file_name = Path::new(filename)
         .file_name().unwrap()
         .to_str().unwrap();
-    let split = file_name.split(":").collect::<Vec<&str>>();
+    let split = file_name.split("-").collect::<Vec<&str>>();
     return split[0];
 }
 

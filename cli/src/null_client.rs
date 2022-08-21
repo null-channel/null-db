@@ -15,7 +15,7 @@ impl NullClient {
 
     pub async fn post(&self,key:String, data: String) -> Result<Response,Error> {
         let body = data.clone();
-        self.client.post(format!("{}{}\n",self.url, key))
+        self.client.post(format!("{}/{}\n",self.url, key))
             .body(body)
             .send()
             .await

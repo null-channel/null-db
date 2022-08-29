@@ -139,7 +139,6 @@ async fn benchmark(records: i32, duration: i32, host: String) -> Option<()> {
 
         // This loop will run once every second
         for r in 0..records {
-            println!("here");
             let ret = client.post(get_random_string(1), get_random_string(rng.gen_range(5..50))).await;
             if ret.is_err() {
                 println!("failed: {:?}",ret)

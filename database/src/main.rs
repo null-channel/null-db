@@ -1,18 +1,15 @@
-use std::{mem, path::Path, ffi::OsStr, error::Error, io};
+use std::{ io};
 use actix_web::{
     delete,
-    dev::HttpResponseBuilder,
     get, post,
     web::{self, Data},
     App, HttpResponse, HttpServer, Responder,
 };
-#[macro_use]
 extern crate lazy_static;
 mod file_reader;
 //use easy_reader::EasyReader;
 use clap::Parser;
 use file_reader::EasyReader;
-use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::BufReader;
@@ -20,7 +17,7 @@ use std::sync::mpsc;
 use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
-    fs::{copy, write, File},
+    fs::{ File},
 }; // read heavy -- probably better period.
 mod file_compactor;
 mod record;
@@ -39,8 +36,8 @@ async fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
     if args.compaction {
-        let (tx, rx) = mpsc::channel();
-        file_compactor::start_compaction(rx);
+        let (_, rx) = mpsc::channel();
+        let _file_compactor_thread = file_compactor::start_compaction(rx);
     }
 
     let file_mutex = Data::new(RwLock::new(false));
@@ -57,6 +54,8 @@ async fn main() -> std::io::Result<()> {
     .await
 }
 
+
+//TODO: this function is now broken! we will have to fix it in another episode!
 #[get("/v1/data/{key}")]
 pub async fn get_value_for_key(
     file_mutex: Data<RwLock<bool>>,
@@ -78,34 +77,50 @@ pub async fn get_value_for_key(
     }
     // Read lock not needed anymore
 
-    // We did not find it in the main writable file. Lets check all the other ones now!
-    let mut segment_files =
-        utils::get_all_files_in_dir("./".to_owned(), utils::LOG_SEGMENT_EXT.to_owned()).unwrap();
+    let mut generation_mapper = utils::get_generations_segment_mapper(file_compactor::SEGMENT_FILE_EXT.to_owned()).unwrap();
 
-    /*
-    * unstable is faster, but could reorder "same" values.
-    * We will not have same values
-    * it does not matter even if we did
-    * file names look like this:
-    * [time].nullsegment
+        /*
+    * unstable is faster, but could reorder "same" values. 
+    * We will not have same values as this was from a set.
     */
-    segment_files.sort_unstable();
+    let mut gen_vec:Vec<i32> = generation_mapper.generations.into_iter().collect();
+    gen_vec.sort_unstable();
 
-    let mut iter = segment_files.into_iter();
+    //Umm... I don't know if this is the best way to do this. it's what I did though, help me?
+    let mut gen_iter = gen_vec.into_iter();
 
-    while let Some(file_path) = iter.next() {
-        println!("{}", file_path);
-        //for file_path in pack_files.clone() {
+    while let Some(current_gen) = gen_iter.next_back() {
+        println!("Gen {} in progress!", current_gen);
+        /* 
+        * Power of rust, we KNOW that this is safe because we just built it...
+        * but it's better to check anyhow... sometimes annoying but.
+        */
+        if let Some(file_name_vec) = generation_mapper.gen_name_segment_files.get_mut(&current_gen) {
+            file_name_vec.sort_unstable();
+            let mut file_name_iter = file_name_vec.into_iter();
+            while let Some(file_path) = file_name_iter.next_back() {
+                
+                //file names: [gen]-[time].nullsegment
+                let path = format!("{}-{}",current_gen,file_path.clone());
+                
+                println!("{}", path);
+        
+                let file = OpenOptions::new()
+                    .read(true)
+                    .write(false)
+                    .open(path.clone())
+                    .expect("db pack file doesn't exist.");
+        
+                let res = utils::check_file_for_key(key.clone(), file);
+                match res {
+                    Ok(value) => return HttpResponse::Ok().body(value.clone()),
+                    Err(errors::NullDbReadError::ValueDeleted) => {
+                        return HttpResponse::Ok().body("value not found")
+                    }
+                    Err(_) => continue, // All other errors (not found in file just mean to check the next file!)
+                }
 
-        let file = File::open(file_path.clone()).unwrap();
-
-        let res = utils::check_file_for_key(key.clone(), file);
-        match res {
-            Ok(value) => return HttpResponse::Ok().body(value.clone()),
-            Err(errors::NullDbReadError::ValueDeleted) => {
-                return HttpResponse::Ok().body("value not found")
             }
-            Err(_) => continue, // All other errors (not found in file just mean to check the next file!)
         }
     }
     HttpResponse::Ok().body("value not found")
@@ -132,6 +147,7 @@ pub async fn delete_value_for_key(
     file_mutex: Data<RwLock<bool>>,
     web::Path(key): web::Path<String>,
 ) -> impl Responder {
+    let _write_lock = file_mutex.write();
     let mut file = OpenOptions::new()
         .write(true)
         .append(true)

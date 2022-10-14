@@ -135,12 +135,12 @@ impl<R: Read + Seek> EasyReader<R> {
         })
     }
 
-    pub fn chunk_size(&mut self, size: usize) -> &mut Self {
+    pub fn _chunk_size(&mut self, size: usize) -> &mut Self {
         self.chunk_size = size;
         self
     }
 
-    pub fn bof(&mut self) -> &mut Self {
+    pub fn _bof(&mut self) -> &mut Self {
         self.current_start_line_offset = 0;
         self.current_end_line_offset = 0;
         self
@@ -179,7 +179,7 @@ impl<R: Read + Seek> EasyReader<R> {
         self.read_line(ReadMode::Prev)
     }
 
-    pub fn current_line(&mut self) -> io::Result<Option<String>> {
+    pub fn _current_line(&mut self) -> io::Result<Option<String>> {
         self.read_line(ReadMode::Current)
     }
 

@@ -1,32 +1,19 @@
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
-use std::sync::mpsc;
 use std::sync::mpsc::TryRecvError;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::mem;
 use std::io::BufReader;
-use std::ffi::OsString;
 use std::io::BufRead;
-use std::ffi::OsStr;
 use std::io::{Write, Result};
-use std::io::prelude::*;
 use std::{thread, time};
-use std::error::Error;
 use std::{
     fs::{
         self,
-        File,
-        write,
-        copy
     },
-    io::{
-        self
-    }
 };
 use std::fs::OpenOptions;
-use std::path::Path;
 use super::record;
 use super::utils;
 
@@ -50,13 +37,13 @@ pub async fn start_compaction(rx: Receiver<i32>) {
         }
 
         println!("Suspending...");
-        thread::sleep(time::Duration::from_secs(30));
+        thread::sleep(time::Duration::from_secs(300));
     });
 }
 
 pub fn compactor() -> Result<()> {
     
-    let mut segment_files = utils::get_all_files_in_dir("./".to_owned(),SEGMENT_FILE_EXT.to_owned())?;
+    let segment_files = utils::get_all_files_in_dir("./".to_owned(),SEGMENT_FILE_EXT.to_owned())?;
 
     // stores the files for a generation
     let mut gen_name_segment_files: HashMap<i32, Vec<String>> = HashMap::new();
@@ -78,7 +65,7 @@ pub fn compactor() -> Result<()> {
             if let Some(generation) = gen_name_segment_files.get_mut(&gen_val) {
                 generation.push(file_name_breakdown[1].to_string());
             } else { //This gen does not have a vec yet! Create it!
-                let mut v = vec![file_name_breakdown[1].to_string()];
+                let v = vec![file_name_breakdown[1].to_string()];
                 gen_name_segment_files.insert(gen_val, v);
             }
         }
@@ -93,7 +80,6 @@ pub fn compactor() -> Result<()> {
 
     /* Setup the variables */
     let data: &mut HashSet<record::Record> = &mut HashSet::new();
-    let mut largest_generation = 0;
     let mut compacted_files: Vec<String> = Vec::new();
 
     //Umm... I don't know if this is the best way to do this. it's what I did though, help me?
@@ -105,7 +91,8 @@ pub fn compactor() -> Result<()> {
         * Power of rust, we KNOW that this is safe because we just built it...
         * but it's better to check anyhow... sometimes annoying but.
         */
-        if let Some(file_name_vec) = gen_name_segment_files.get(&current_gen) {
+        if let Some(file_name_vec) = gen_name_segment_files.get_mut(&current_gen) {
+            file_name_vec.sort_unstable();
             let mut file_name_iter = file_name_vec.into_iter();
             while let Some(file_path) = file_name_iter.next_back() {
                 
@@ -113,10 +100,6 @@ pub fn compactor() -> Result<()> {
                 let path = format!("{}-{}",current_gen,file_path.clone());
                 
                 println!("{}", path);
-
-                if largest_generation < current_gen {
-                    largest_generation = current_gen;
-                }                
         
                 let file = OpenOptions::new()
                     .read(true)
@@ -171,7 +154,7 @@ pub fn compactor() -> Result<()> {
                     }
         
                     for f in &compacted_files {
-                        let res = fs::remove_file(path.clone());
+                        let res = fs::remove_file(f.clone());
                         if res.is_err() {
                             println!("Failed to delete old file:{:?}", res)
                         }
@@ -229,6 +212,8 @@ pub fn compactor() -> Result<()> {
     return Ok(());
 }
 
+
+/* TODO: Delete me
 fn get_generation_from_filename(filename: &str) -> &str {
     let file_name = Path::new(filename)
         .file_name().unwrap()
@@ -242,7 +227,7 @@ fn get_extension_from_filename(filename: &str) -> Option<&str> {
         .extension()
         .and_then(OsStr::to_str)
 }
-
+ */
 /* 
 * This test hearts my soul. It made me regret much.
 * Sadly it's all I have time for if I want to get this video out.
@@ -254,7 +239,6 @@ fn get_extension_from_filename(filename: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use std::env;
-    use std::path::Path;
     use std::fs;
     use super::utils;
     use super::compactor;
@@ -268,7 +252,7 @@ mod tests {
             assert!(fs::copy("../test-segments/1-2.nullsegment", "1-2.nullsegment").is_ok());
             assert!(fs::copy("../test-segments/2-1.nullsegment", "2-1.nullsegment").is_ok());
 
-            compactor();
+            let _ = compactor();
 
             if let Ok(files) = utils::get_all_files_in_dir("./".to_owned(),"nullsegment".to_owned()) {
                 assert!(files.len() == 1);
@@ -276,7 +260,7 @@ mod tests {
                 if let Some(f) = files.first() {
                     // remove the file so the tests passes again.
                     // should check the value of the file.. but...
-                    fs::remove_file(f);
+                    let _ = fs::remove_file(f);
                 }
             }
         }

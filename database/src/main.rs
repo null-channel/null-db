@@ -41,6 +41,7 @@ async fn main() -> std::io::Result<()> {
     }
 
     let file_mutex = Data::new(RwLock::new(false));
+    
     HttpServer::new(move || {
         App::new()
             .app_data(file_mutex.clone())
@@ -79,7 +80,7 @@ pub async fn get_value_for_key(
 
     let mut generation_mapper = utils::get_generations_segment_mapper(file_compactor::SEGMENT_FILE_EXT.to_owned()).unwrap();
 
-        /*
+    /*
     * unstable is faster, but could reorder "same" values. 
     * We will not have same values as this was from a set.
     */
@@ -89,7 +90,7 @@ pub async fn get_value_for_key(
     //Umm... I don't know if this is the best way to do this. it's what I did though, help me?
     let mut gen_iter = gen_vec.into_iter();
 
-    while let Some(current_gen) = gen_iter.next_back() {
+    while let Some(current_gen) = gen_iter.next() {
         println!("Gen {} in progress!", current_gen);
         /* 
         * Power of rust, we KNOW that this is safe because we just built it...

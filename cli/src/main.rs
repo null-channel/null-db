@@ -1,15 +1,8 @@
-
-use std::collections::HashMap;
-use clap::{AppSettings, Parser, Subcommand};
-use uuid::Uuid;
-use std::time::Duration;
-use std::iter;
-use std::sync::mpsc;
-use std::{thread, time};
+use clap::{Parser, Subcommand};
+use rand::distributions::{Alphanumeric};
+use rand::{thread_rng, Rng};
 use std::convert::TryInto;
-use rand::prelude::*;
-use rand::{thread_rng,Rng};
-use rand::distributions::{Alphanumeric, Uniform, Standard};
+use std::{thread, time};
 
 mod null_client;
 
@@ -23,7 +16,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-
     Put {
         key: String,
         value: String,
@@ -31,7 +23,7 @@ enum Commands {
         host: String,
     },
 
-    Get { 
+    Get {
         key: String,
         #[clap(long, default_value = "localhost")]
         host: String,
@@ -55,8 +47,7 @@ enum Commands {
     Compact {
         #[clap(long, default_value = "localhost")]
         host: String,
-    }
-
+    },
 }
 
 #[derive(Parser, Debug)]
@@ -72,7 +63,6 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-
     let args = Cli::parse();
 
     match &args.command {
@@ -80,45 +70,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("putting data {}", value);
             let client = reqwest::Client::new();
             let data = value.clone();
-            let resp = client.post(format!("http://{}:8080/{}/{}\n",host,"v1/data", key))
+            let resp = client
+                .post(format!("http://{}:8080/{}/{}\n", host, "v1/data", key))
                 .body(data)
                 .send()
                 .await?
-                .text().await?;
+                .text()
+                .await?;
 
-            println!("{}",resp)
+            println!("{}", resp)
         }
 
-        Commands::Get { key , host} => {
+        Commands::Get { key, host } => {
             println!("getting data for key {}", key);
-            let resp = reqwest::get(format!("http://{}:8080/{}/{}\n",host,"v1/data", key))
-            .await?
-            .text()
-            .await?;
-            println!("key {}:{}",key,resp)
+            let resp = reqwest::get(format!("http://{}:8080/{}/{}\n", host, "v1/data", key))
+                .await?
+                .text()
+                .await?;
+            println!("key {}:{}", key, resp)
         }
 
-        Commands::Delete { key, host} => {
+        Commands::Delete { key, host } => {
             println!("deleting data for key {}", key);
             let client = reqwest::Client::new();
-            let resp = client.delete(format!("http://{}:8080/{}/{}\n",host,"v1/data", key)).send()
-            .await?
-            .text()
-            .await?;
+            let _resp = client
+                .delete(format!("http://{}:8080/{}/{}\n", host, "v1/data", key))
+                .send()
+                .await?
+                .text()
+                .await?;
         }
 
-        Commands::Bench {records,duration,host} => {
+        Commands::Bench {
+            records,
+            duration,
+            host,
+        } => {
             println!("benchmarking database");
-            benchmark(*records,*duration,host.to_string()).await;
+            benchmark(*records, *duration, host.to_string()).await;
         }
 
-        Commands::Compact {host} => {
+        Commands::Compact { host } => {
             println!("Making a compation request!");
-            let resp = reqwest::get(format!("http://{}:8080/{}\n",host, "v1/management/compact"))
+            let _resp = reqwest::get(format!(
+                "http://{}:8080/{}\n",
+                host, "v1/management/compact"
+            ))
             .await?
             .text()
             .await?;
-
         }
     }
 
@@ -126,26 +126,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn benchmark(records: i32, duration: i32, host: String) -> Option<()> {
-
-
     let start = time::Instant::now();
     let client = null_client::NullClient::new(format!("http://{}:8080/v1/data", host).to_string());
 
     println!("Countdown");
-    let now = time::Instant::now();
     let mut rng = thread_rng();
     for _i in 0..duration {
         let then = time::Instant::now();
 
         // This loop will run once every second
-        for r in 0..records {
-            let ret = client.post(get_random_string(1), get_random_string(rng.gen_range(5..50))).await;
+        for _ in 0..records {
+            let ret = client
+                .post(
+                    get_random_string(1),
+                    get_random_string(rng.gen_range(5..50)),
+                )
+                .await;
             if ret.is_err() {
-                println!("failed: {:?}",ret)
+                println!("failed: {:?}", ret)
             }
         }
 
-        let dur: u64 = ((time::Instant::now()-then).as_millis()).try_into().unwrap();
+        let dur: u64 = ((time::Instant::now() - then).as_millis())
+            .try_into()
+            .unwrap();
         let sleep_time: u64 = 1000 - dur;
 
         if sleep_time > 0 {
@@ -154,14 +158,23 @@ async fn benchmark(records: i32, duration: i32, host: String) -> Option<()> {
         }
     }
 
-    let end: u64 = ((time::Instant::now()-start).as_millis()).try_into().unwrap();
-    println!("Benchmarking took:{} \nTotal Records Saved: {} \nRecords per MS:{}", end, duration * records, (duration*records) as f64/end as f64);
-    return Some(())
+    let end: u64 = ((time::Instant::now() - start).as_millis())
+        .try_into()
+        .unwrap();
+    println!(
+        "Benchmarking took:{} \nTotal Records Saved: {} \nRecords per MS:{}",
+        end,
+        duration * records,
+        (duration * records) as f64 / end as f64
+    );
+    return Some(());
 }
 
 fn get_random_string(length: usize) -> String {
-    let chars: Vec<u8> = rand::thread_rng().sample_iter(&Alphanumeric).take(length).collect();
+    let chars: Vec<u8> = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(length)
+        .collect();
     let s = std::str::from_utf8(&chars).unwrap().to_string();
     return s;
 }
-

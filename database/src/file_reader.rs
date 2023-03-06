@@ -420,4 +420,3 @@ impl<R: Read + Seek> EasyReader<R> {
         Ok(buffer)
     }
 }
-

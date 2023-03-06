@@ -1,4 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug)]
@@ -14,9 +13,7 @@ impl Hash for Record {
     }
 }
 
-impl Eq for Record {
-    
-}
+impl Eq for Record {}
 
 impl PartialEq for Record {
     fn eq(&self, other: &Self) -> bool {
@@ -30,15 +27,18 @@ impl PartialEq for Record {
 
 // Lets make our records a bit easier to use!
 impl Record {
-    pub fn new(keyvalue:String) -> Option<Record> {
+    pub fn new(keyvalue: String) -> Option<Record> {
         let split = keyvalue.split(":").collect::<Vec<&str>>();
         if split.len() == 2 {
-            return Some(Record {key: split[0].to_string().clone(), value: split[1].to_string().clone()})
+            return Some(Record {
+                key: split[0].to_string().clone(),
+                value: split[1].to_string().clone(),
+            });
         }
         return None;
     }
 
     pub fn get_string(&self) -> String {
-        return format!("{}:{}",self.key, self.value);
+        return format!("{}:{}", self.key, self.value);
     }
 }

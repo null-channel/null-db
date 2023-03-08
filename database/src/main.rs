@@ -10,7 +10,6 @@ use clap::Parser;
 use file_reader::EasyReader;
 use nulldb::NullDB;
 use std::sync::mpsc;
-use utils::get_main_log_file;
 mod errors;
 mod file_compactor;
 mod nulldb;
@@ -29,20 +28,10 @@ async fn main() -> Result<(), std::io::Error> {
     let args = Args::parse();
 
     // get main log file on fresh boot
-    let main_log = match get_main_log_file() {
+    let main_log = match utils::create_next_segment_file() {
         Ok(main_log) => main_log,
         Err(e) => {
-            // Should warn here, but maybe the db has never run before and should just create one.
-            println!(
-                "Error getting main log file: {}, will start new database!",
-                e
-            );
-            match utils::create_next_segment_file() {
-                Ok(main_log) => main_log,
-                Err(e) => {
-                    panic!("Could not create new main log file! error: {}", e);
-                }
-            }
+            panic!("Could not create new main log file! error: {}", e);
         }
     };
 
@@ -73,8 +62,10 @@ async fn get_value_for_key(db: Data<NullDB>, request: web::Path<String>) -> impl
     let ret = db.get_value_for_key(key.clone());
 
     match ret {
-        Err(_) => HttpResponse::InternalServerError(),
-        Ok(_) => HttpResponse::Ok(),
+        Err(e) => {
+            HttpResponse::InternalServerError().body(format!("Issue getting value for key: {}", e))
+        }
+        Ok(value) => HttpResponse::Ok().body(value),
     }
 }
 
@@ -85,7 +76,7 @@ pub async fn put_value_for_key(
     req_body: String,
 ) -> impl Responder {
     println!("putting data {}", req_body);
-    let ret = db.write_value_to_log(format!("{}:{}", key, req_body));
+    let ret = db.write_value_to_log(key.into_inner(), req_body);
 
     match ret {
         Err(_) => HttpResponse::InternalServerError(),

@@ -1,5 +1,6 @@
 use crate::{errors, file_compactor, utils};
 use anyhow::anyhow;
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::BufRead;
@@ -9,6 +10,7 @@ use std::{fs::File, io::BufReader};
 pub struct NullDB {
     main_log_mutex: RwLock<String>,
     main_log_file_mutex: RwLock<bool>,
+    main_log_memory_mutex: RwLock<HashMap<String, String>>,
 }
 
 impl NullDB {
@@ -16,6 +18,7 @@ impl NullDB {
         NullDB {
             main_log_mutex: RwLock::new(main_log),
             main_log_file_mutex: RwLock::new(false),
+            main_log_memory_mutex: RwLock::new(HashMap::new()),
         }
     }
 
@@ -29,34 +32,25 @@ impl NullDB {
 
     // Deletes a record from the log
     pub fn delete_record(&self, key: String) -> anyhow::Result<()> {
-        self.write_value_to_log(format!("{}:{}", key, utils::TOMBSTONE))
+        self.write_value_to_log(key, utils::TOMBSTONE.into())
     }
 
     pub fn get_value_for_key(&self, key: String) -> anyhow::Result<String> {
-        // Scope so read lock drops after finished with the "main" file.
-        let main_log = self.main_log_mutex.read();
-        let Ok(main_log) = main_log else {
+        // Aquire read lock on main log
+        let Ok(main_log) = self.main_log_memory_mutex.read() else {
+            println!("Could not get main log file!");
             return Err(anyhow!("Could not get main log file!"));
         };
 
-        {
-            let _file_lock = self.main_log_file_mutex.read();
-            let file = File::open(main_log.clone()).unwrap();
-
-            let res = utils::check_file_for_key(key.clone(), file);
-            match res {
-                Ok(value) => return Ok(value.clone()),
-                Err(errors::NullDbReadError::ValueDeleted) => {
-                    return Ok("value not found".into());
-                }
-                Err(_) => (), // All other errors mean we need to check the segments!
-            }
+        // Check the main log first for key
+        if let Some(value) = main_log.get(&key) {
+            println!("Returned value from main log! {}", value);
+            return Ok(value.clone());
         }
-        // write lock not needed anymore
 
+        // If not in main log, check all the segments
         let mut generation_mapper =
-            utils::get_generations_segment_mapper(file_compactor::SEGMENT_FILE_EXT.to_owned())
-                .unwrap();
+            utils::get_generations_segment_mapper(file_compactor::SEGMENT_FILE_EXT.to_owned())?;
 
         /*
          * unstable is faster, but could reorder "same" values.
@@ -67,6 +61,9 @@ impl NullDB {
 
         //Umm... I don't know if this is the best way to do this. it's what I did though, help me?
         let mut gen_iter = gen_vec.into_iter();
+        let Ok(main_log_filename) = self.main_log_mutex.read() else {
+            return Err(anyhow!("Could not get main log file name!"));
+        };
 
         while let Some(current_gen) = gen_iter.next() {
             println!("Gen {} in progress!", current_gen);
@@ -85,7 +82,7 @@ impl NullDB {
                     let path = format!("{}-{}", current_gen, file_path.clone());
 
                     // Don't check the main log, we already did that.
-                    if path == main_log.clone() {
+                    if path == *main_log_filename {
                         continue;
                     }
 
@@ -110,7 +107,7 @@ impl NullDB {
     }
 
     // Writes value to log, will create new log if over 64 lines.
-    pub fn write_value_to_log(&self, value: String) -> anyhow::Result<()> {
+    pub fn write_value_to_log(&self, key: String, value: String) -> anyhow::Result<()> {
         println!("Writing to log: {}", value);
         let line_count;
         {
@@ -136,17 +133,40 @@ impl NullDB {
             *main_log = utils::create_next_segment_file()?;
         }
 
-        let main_log = self.main_log_mutex.read();
-        let Ok(main_log) = main_log else {
+        // Aquire write lock on main log file
+        let Ok(_main_log_disk) = self.main_log_file_mutex.write() else {
             return Err(anyhow!("Could not get main log file!"));
         };
+
+        // Aquire write lock on main log memory
+        let Ok(mut main_log_memory) = self.main_log_memory_mutex.write() else {
+            return Err(anyhow!("Could not get main log in memory!"));
+        };
+
+        // Aquire read lock on main log file name
+        let Ok(main_log_name) = self.main_log_mutex.read() else {
+            return Err(anyhow!("Could not get main log file name!"));
+        };
+
+        // Write to memory
+        let old_value = main_log_memory.insert(key.clone(), value.clone());
 
         let mut file = OpenOptions::new()
             .write(true)
             .append(true)
-            .open(main_log.clone())?;
+            .open(main_log_name.clone())?;
 
-        writeln!(file, "{}", value)?;
+        let ret = writeln!(file, "{}:{}", key, value);
+
+        if ret.is_err() {
+            // If we failed to write to disk, reset the memory to what it was before
+            if let Some(old_value) = old_value {
+                main_log_memory.insert(key.clone(), old_value);
+            } else {
+                main_log_memory.remove(&key);
+            }
+            return Err(anyhow!("Could not write to main log file!"));
+        }
         Ok(())
     }
 }

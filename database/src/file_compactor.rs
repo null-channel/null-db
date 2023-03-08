@@ -89,7 +89,10 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
         Ok(f) => f,
         Err(e) => {
             println!("No main log file found when compacting!");
-            return Err(anyhow!("No main log file found when compacting! error: {}", e));
+            return Err(anyhow!(
+                "No main log file found when compacting! error: {}",
+                e
+            ));
         }
     };
 

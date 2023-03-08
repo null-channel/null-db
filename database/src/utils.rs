@@ -1,6 +1,5 @@
 use super::errors;
 use super::EasyReader;
-use anyhow::anyhow;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs::File;
@@ -28,37 +27,6 @@ pub fn get_all_files_in_dir(path: String, ext: String) -> std::io::Result<Vec<St
         })
         .collect::<Vec<String>>();
     return Ok(file_paths);
-}
-
-pub fn get_main_log_file() -> anyhow::Result<String> {
-    let mut generation_mapper = get_generations_segment_mapper("nullsegment".to_owned())?;
-
-    /*
-     * unstable is faster, but could reorder "same" values.
-     * We will not have same values as this was from a set.
-     */
-    let mut gen_vec: Vec<i32> = generation_mapper.generations.into_iter().collect();
-    gen_vec.sort_unstable();
-
-    //Umm... I don't know if this is the best way to do this. it's what I did though, help me?
-    let mut gen_iter = gen_vec.into_iter();
-
-    while let Some(current_gen) = gen_iter.next() {
-        println!("Gen {} in progress!", current_gen);
-
-        if let Some(file_name_vec) = generation_mapper
-            .gen_name_segment_files
-            .get_mut(&current_gen)
-        {
-            file_name_vec.sort_unstable();
-            let mut file_name_iter = file_name_vec.into_iter();
-            while let Some(file_path) = file_name_iter.next_back() {
-                return Ok(format!("{}-{}", current_gen, file_path.clone()));
-            }
-        }
-    }
-
-    return Err(anyhow!("no files found!"));
 }
 
 pub fn get_extension_from_filename(filename: &str) -> Option<&str> {

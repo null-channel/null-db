@@ -36,7 +36,7 @@ impl NullDB {
     }
 
     pub fn get_value_for_key(&self, key: String) -> anyhow::Result<String> {
-        // Aquire read lock on main log
+        // Aquire read lock on main log in memory
         let Ok(main_log) = self.main_log_memory_mutex.read() else {
             println!("Could not get main log file!");
             return Err(anyhow!("Could not get main log file!"));
@@ -116,9 +116,7 @@ impl NullDB {
                 println!("Could not get main log file!");
                 return Err(anyhow!("Could not get main log file!"));
             };
-            println!("just before opening file");
             let file = File::open(main_log.clone())?;
-            println!("just after opening file");
             // make new file if over our 64 lines max
             let f = BufReader::new(file);
             line_count = f.lines().count();

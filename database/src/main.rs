@@ -15,6 +15,7 @@ mod file_compactor;
 mod nulldb;
 mod record;
 mod utils;
+mod index;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -36,6 +37,11 @@ async fn main() -> Result<(), std::io::Error> {
     };
 
     let null_db = NullDB::new(main_log);
+
+
+    let Ok(null_db) = null_db else {
+        panic!("Could not create indexes!!!");
+    };
 
     let db_mutex = Data::new(null_db);
     if args.compaction {

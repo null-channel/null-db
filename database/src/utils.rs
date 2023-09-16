@@ -10,7 +10,7 @@ use std::collections::HashMap;
 pub const TOMBSTONE: &'static str = "~tombstone~";
 pub const LOG_SEGMENT_EXT: &'static str = "nullsegment";
 
-pub fn get_all_files_in_dir(path: String, ext: String) -> std::io::Result<Vec<String>> {
+pub fn get_all_files_by_ext(path: String, ext: String) -> std::io::Result<Vec<String>> {
     let paths = std::fs::read_dir(path)?;
     let file_paths = paths
         .into_iter()
@@ -56,6 +56,22 @@ pub fn check_file_for_key(key: String, file: File) -> Result<String, errors::Nul
     return Err(errors::NullDbReadError::ValueNotFound);
 }
 
+
+pub fn get_value_from_database(value: String) -> anyhow::Result<String, errors::NullDbReadError> {
+    
+    let split = value.split(":").collect::<Vec<&str>>();
+    if split.len() != 2 {
+       return Err(errors::NullDbReadError::Corrupted); 
+    }
+
+    let val = split[1].to_string().clone();
+    if val == TOMBSTONE {
+        return Err(errors::NullDbReadError::ValueDeleted);
+    }
+
+    Ok(value)
+}
+
 #[derive(Debug)]
 pub struct SegmentGenerationMapper {
     pub gen_name_segment_files: HashMap<i32, Vec<String>>,
@@ -72,8 +88,8 @@ pub fn create_next_segment_file() -> anyhow::Result<String> {
     Ok(file_name)
 }
 
-pub fn get_generations_segment_mapper(ext: String) -> anyhow::Result<SegmentGenerationMapper> {
-    let segment_files = get_all_files_in_dir("./".to_owned(), ext)?;
+pub fn get_generations_segment_mapper(ext: String) -> anyhow::Result<SegmentGenerationMapper, errors::NullDbReadError> {
+    let segment_files = get_all_files_by_ext("./".to_owned(), ext).map_err(|e| errors::NullDbReadError::IOError(e))?;
 
     let mut generations = SegmentGenerationMapper {
         gen_name_segment_files: HashMap::new(),
@@ -102,5 +118,5 @@ pub fn get_generations_segment_mapper(ext: String) -> anyhow::Result<SegmentGene
         }
     }
 
-    return Ok(generations);
+    return Ok(generations)
 }

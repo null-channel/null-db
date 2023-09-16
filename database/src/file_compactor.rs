@@ -42,7 +42,7 @@ pub async fn start_compaction(rx: Receiver<i32>, db: Data<NullDB>) {
 }
 
 pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
-    let segment_files = utils::get_all_files_in_dir("./".to_owned(), SEGMENT_FILE_EXT.to_owned())?;
+    let segment_files = utils::get_all_files_by_ext("./".to_owned(), SEGMENT_FILE_EXT.to_owned())?;
 
     // stores the files for a generation
     let mut gen_name_segment_files: HashMap<i32, Vec<String>> = HashMap::new();
@@ -265,7 +265,7 @@ mod tests {
             //let _ = compactor();
 
             if let Ok(files) =
-                utils::get_all_files_in_dir("./".to_owned(), "nullsegment".to_owned())
+                utils::get_all_files_by_ext("./".to_owned(), "nullsegment".to_owned())
             {
                 assert!(files.len() == 1);
 

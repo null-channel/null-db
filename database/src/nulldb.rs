@@ -5,21 +5,27 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::BufRead;
 use std::sync::RwLock;
-use std::{fs::File, io::BufReader};
+use std::{fs::File, io::BufReader, io::prelude::*};
+use crate::index::*;
 
 pub struct NullDB {
     main_log_mutex: RwLock<String>,
     main_log_file_mutex: RwLock<bool>,
     main_log_memory_mutex: RwLock<HashMap<String, String>>,
+    // Segment, Index 
+    log_indexes: RwLock<HashMap<String, Index>>,
+    
 }
 
 impl NullDB {
-    pub fn new(main_log: String) -> NullDB {
-        NullDB {
+    pub fn new(main_log: String) -> anyhow::Result<NullDB,errors::NullDbReadError> {
+        let indexes = RwLock::new(generate_indexes(main_log.clone())?);
+        Ok(NullDB {
             main_log_mutex: RwLock::new(main_log),
             main_log_file_mutex: RwLock::new(false),
             main_log_memory_mutex: RwLock::new(HashMap::new()),
-        }
+            log_indexes: indexes,
+        })
     }
 
     // gets name of main log file "right now" does not hold read lock so value maybe be stale
@@ -35,11 +41,11 @@ impl NullDB {
         self.write_value_to_log(key, utils::TOMBSTONE.into())
     }
 
-    pub fn get_value_for_key(&self, key: String) -> anyhow::Result<String> {
+    pub fn get_value_for_key(&self, key: String) -> anyhow::Result<String, errors::NullDbReadError> {
         // Aquire read lock on main log in memory
         let Ok(main_log) = self.main_log_memory_mutex.read() else {
             println!("Could not get main log file!");
-            return Err(anyhow!("Could not get main log file!"));
+            panic!("we have poisiod our locks");
         };
 
         // Check the main log first for key
@@ -62,7 +68,7 @@ impl NullDB {
         //Umm... I don't know if this is the best way to do this. it's what I did though, help me?
         let mut gen_iter = gen_vec.into_iter();
         let Ok(main_log_filename) = self.main_log_mutex.read() else {
-            return Err(anyhow!("Could not get main log file name!"));
+            panic!("we have poisiod our locks... don't do this please");
         };
 
         while let Some(current_gen) = gen_iter.next() {
@@ -86,20 +92,23 @@ impl NullDB {
                         continue;
                     }
 
-                    let file = OpenOptions::new()
-                        .read(true)
-                        .write(false)
-                        .open(path.clone())
-                        .expect("db pack file doesn't exist.");
 
-                    let res = utils::check_file_for_key(key.clone(), file);
-                    match res {
-                        Ok(value) => return Ok(value.clone()),
-                        Err(errors::NullDbReadError::ValueDeleted) => {
-                            return Ok("value not found".into())
-                        }
-                        Err(_) => continue, // All other errors (not found in file just mean to check the next file!)
-                    }
+                    //Check index for value
+                    let Ok(log_index) = self.log_indexes.read() else {
+                        panic!("could not optain read log on indexes");
+                    };
+                        
+                    let index = log_index.get(&path);
+                    
+                    let Some(index) = index else {
+                        panic!("Index not found for log segment");
+                    };
+
+                    let Some(line_number) = index.get(&key) else {
+                        continue;
+                    };
+
+                    return get_value_from_segment(path, *line_number);
                 }
             }
         }
@@ -167,4 +176,29 @@ impl NullDB {
         }
         Ok(())
     }
+}
+
+fn get_value_from_segment(path: String, line_number: usize ) -> anyhow::Result<String,errors::NullDbReadError> {
+
+                    
+    let file = OpenOptions::new()
+        .read(true)
+        .write(false)
+        .open(path.clone())
+        .expect("db pack file doesn't exist.");
+
+
+    let mut bb = BufReader::new(file);
+    let mut buffer_iter = bb.lines();                   
+    // .nth -> Option<Result<String,Err>>
+    let value = buffer_iter.nth(line_number).expect("index missed");
+
+    let Ok(value) = value else {
+        panic!("data corrupted");
+    };
+
+    let parsed_value = utils::get_value_from_database(value)?;
+
+    return Ok(parsed_value);
+
 }

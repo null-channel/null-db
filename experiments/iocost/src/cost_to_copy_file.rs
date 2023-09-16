@@ -27,7 +27,7 @@ fn old_test() {
 
 extern crate test;
 
-// IO Time
+// copilot_function
 // How long does it take to copy the main segment?
 fn copy_main_segment() -> Result<(), Box<dyn Error>> {
     let mut reader = BufReader::new(File::open("null.database")?);
@@ -43,9 +43,9 @@ fn copy_main_segment() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn copy_main_segment_human() -> Result<(), Box<dyn Error>> {
-    std::fs::copy("null.database", "null.database.compacted").unwrap();
-    Ok(())
+// marek_function
+fn copy_main_segment_human() -> Result<u64, std::io::Error> {
+    std::fs::copy("null.database", "null.database.compacted")
 }
 
 #[cfg(test)]

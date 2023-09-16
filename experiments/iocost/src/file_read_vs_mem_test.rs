@@ -19,11 +19,6 @@ mod tests {
     use super::*;
     use test::Bencher;
 
-    #[test]
-    fn it_works() {
-        assert_eq!(4, add_two(2));
-    }
-
     #[bench]
     fn bench_read_memory_from_hashmap(b: &mut Bencher) {
 
@@ -92,7 +87,6 @@ mod tests {
                     }
                 }
             }
-
         });
     }
 

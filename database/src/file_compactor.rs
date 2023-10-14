@@ -1,6 +1,7 @@
 use actix_web::web::Data;
 use anyhow::anyhow;
 
+use crate::index::generate_index_for_segment;
 use crate::nulldb::NullDB;
 
 use super::record;
@@ -17,6 +18,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::TryRecvError;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{thread, time};
+
 
 pub const SEGMENT_FILE_EXT: &'static str = "nullsegment";
 const MAX_FILE_SIZE: &'static usize = &(1 * 1024); //1kb block
@@ -146,16 +148,13 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
                 if mem::size_of_val(&data) > *MAX_FILE_SIZE {
                     // Calculate file generation
                     let file_gen = current_gen + 1;
-
-                    // current time
-                    let start = SystemTime::now();
-                    let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
-
+                    println!("===========I DO NOT RUN============");
+                    let new_segment_name = generate_segment_file_name(file_gen);
                     // Create new file
                     let mut new_file = OpenOptions::new()
                         .write(true)
                         .create(true)
-                        .open(format!("{}-{:?}.nullsegment", file_gen, since_the_epoch))
+                        .open(new_segment_name.clone())
                         .unwrap();
 
                     // interesting we don't "care" about the order now
@@ -166,7 +165,13 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
                         }
                     }
 
+                    let index = generate_index_for_segment(new_segment_name.clone()); 
+                    db.add_index(new_segment_name.clone(), index);
+                    println!("saved new segment index: {}", new_segment_name.clone());
+
+                    eprintln!("files to be deleted: {:?}", compacted_files);
                     for f in &compacted_files {
+                        db.remove_index(f);
                         let res = fs::remove_file(f.clone());
                         if res.is_err() {
                             println!("Failed to delete old file:{:?}", res)
@@ -191,14 +196,12 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
         let file_gen = 1;
 
         // current time
-        let start = SystemTime::now();
-        let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
-
+        let new_segment_name = generate_segment_file_name(file_gen);
         // Create new file
         let mut new_file = OpenOptions::new()
             .write(true)
             .create(true)
-            .open(format!("{}-{:?}.nullsegment", file_gen, since_the_epoch))
+            .open(new_segment_name.clone())
             .unwrap();
 
         // interesting we don't "care" about the order now
@@ -208,11 +211,15 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
                 eprintln!("Couldn't write to file: {}", e);
             }
         }
+
+        let index = generate_index_for_segment(new_segment_name.clone()); 
+        db.add_index(new_segment_name.clone(), index);
     }
 
     println!("deleting old logs");
     // delete old compacted files now that the new files are saved to disk.
     for f in &compacted_files {
+        db.remove_index(f);
         let res = fs::remove_file(f);
         if res.is_err() {
             println!("Failed to delete old file:{:?}", res)
@@ -220,6 +227,13 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
     }
 
     return Ok(());
+}
+
+
+fn generate_segment_file_name(file_gen: i32) -> String {
+        let start = SystemTime::now();
+        let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
+        format!("{}-{:?}.nullsegment", file_gen,since_the_epoch)
 }
 
 /* TODO: Delete me

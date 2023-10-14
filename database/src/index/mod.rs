@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::errors;
+use crate::{errors, utils};
 
 use super::utils::get_generations_segment_mapper;
 use std::fs::OpenOptions;
@@ -35,31 +35,40 @@ pub fn generate_indexes(main_log: String) -> anyhow::Result<HashMap<String,Index
                 //file names: [gen]-[time].nullsegment
                 let path = format!("{}-{}", current_gen, file_path.clone());
 
-                let mut index = Index::new();
                 // Don't check the main log, we already did that.
                 if path == *main_log {
                     continue;
                 }
 
-                let file = OpenOptions::new()
-                    .read(true)
-                    .write(false)
-                    .open(path.clone())
-                    .expect("db pack file doesn't exist.");
-                let reader = BufReader::new(file);
-
-                let mut line_num = 0;
-                for line in reader.lines() {
-                    
-                    if let Ok(line) = line {
-                       index.insert(line,line_num);
-                    }
-
-                    line_num = line_num + 1;
-                }
-                indexes.insert(path, index);
+                indexes.insert(path.clone(), generate_index_for_segment(path));
             }
         }
     }
     Ok(indexes)
+}
+
+pub fn generate_index_for_segment(segment_path: String) -> Index {
+
+    let mut index = Index::new();
+
+    let file = OpenOptions::new()
+        .read(true)
+        .write(false)
+        .open(segment_path.clone())
+        .expect("db pack file doesn't exist.");
+    let reader = BufReader::new(file);
+
+    let mut line_num = 0;
+    for line in reader.lines() {
+        
+        if let Ok(line) = line {
+            if let Ok(parsed_value) = utils::get_key_from_database_line(line) {
+                index.insert(parsed_value,line_num);
+            }
+        }
+
+        line_num = line_num + 1;
+    }
+    println!("file: {}, index: {:?}", segment_path.clone(),index);
+    index
 }

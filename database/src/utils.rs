@@ -72,6 +72,23 @@ pub fn get_value_from_database(value: String) -> anyhow::Result<String, errors::
     Ok(value)
 }
 
+pub fn get_key_from_database_line(value: String) -> anyhow::Result<String, errors::NullDbReadError> {
+    
+    let split = value.split(":").collect::<Vec<&str>>();
+    if split.len() != 2 {
+       return Err(errors::NullDbReadError::Corrupted); 
+    }
+
+    let val = split[1].to_string().clone();
+    if val == TOMBSTONE {
+        return Err(errors::NullDbReadError::ValueDeleted);
+    }
+
+    let key = split[0].to_string().clone();
+
+    Ok(key)
+}
+
 #[derive(Debug)]
 pub struct SegmentGenerationMapper {
     pub gen_name_segment_files: HashMap<i32, Vec<String>>,

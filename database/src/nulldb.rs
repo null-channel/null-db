@@ -1,3 +1,4 @@
+use crate::index;
 use crate::{errors, file_compactor, utils};
 use anyhow::anyhow;
 use std::collections::HashMap;
@@ -5,7 +6,7 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::BufRead;
 use std::sync::RwLock;
-use std::{fs::File, io::BufReader, io::prelude::*};
+use std::{fs::File, io::BufReader};
 use crate::index::*;
 
 pub struct NullDB {
@@ -92,7 +93,6 @@ impl NullDB {
                         continue;
                     }
 
-
                     //Check index for value
                     let Ok(log_index) = self.log_indexes.read() else {
                         panic!("could not optain read log on indexes");
@@ -105,8 +105,11 @@ impl NullDB {
                     };
 
                     let Some(line_number) = index.get(&key) else {
+                        println!("key: {}, not found in index: {:?}", key.clone(), index );
                         continue;
                     };
+
+                    println!("record found, file:{}, line_number:{}", path.clone(),line_number);
 
                     return get_value_from_segment(path, *line_number);
                 }
@@ -131,12 +134,22 @@ impl NullDB {
             line_count = f.lines().count();
         }
 
-        println!("Line count: {}", line_count);
-        if line_count > 64 {
+        // Check if main log is "full"
+        if line_count > 5 {
             let main_log = self.main_log_mutex.write();
             let Ok(mut main_log) = main_log else {
                 return Err(anyhow!("Could not get main log file!"));
             };
+            let index = index::generate_index_for_segment(main_log.to_string());
+            self.add_index(main_log.to_string(), index);
+            
+            let Ok(mut main_memory_log) = self.main_log_memory_mutex.write() else {
+                println!("Could not get main log file!");
+                panic!("we have poisiod our locks");
+            };
+
+            // Check the main log first for key
+            main_memory_log.clear();
             *main_log = utils::create_next_segment_file()?;
         }
 
@@ -176,19 +189,32 @@ impl NullDB {
         }
         Ok(())
     }
+
+    pub fn add_index(&self, segment: String, index: Index) -> Option<Index> {
+        let Ok(mut main_index) = self.log_indexes.write() else {
+            panic!("could not optain write lock to index");
+        };
+
+        main_index.insert(segment, index)
+    }
+
+    pub fn remove_index(&self, segment: &String) -> Option<Index> {
+        let Ok(mut main_index) = self.log_indexes.write() else {
+            panic!("could not optain write lock to index");
+        };
+
+        main_index.remove(segment)
+    }
 }
 
 fn get_value_from_segment(path: String, line_number: usize ) -> anyhow::Result<String,errors::NullDbReadError> {
-
-                    
     let file = OpenOptions::new()
         .read(true)
         .write(false)
         .open(path.clone())
         .expect("db pack file doesn't exist.");
 
-
-    let mut bb = BufReader::new(file);
+    let bb = BufReader::new(file);
     let mut buffer_iter = bb.lines();                   
     // .nth -> Option<Result<String,Err>>
     let value = buffer_iter.nth(line_number).expect("index missed");
@@ -200,5 +226,4 @@ fn get_value_from_segment(path: String, line_number: usize ) -> anyhow::Result<S
     let parsed_value = utils::get_value_from_database(value)?;
 
     return Ok(parsed_value);
-
 }

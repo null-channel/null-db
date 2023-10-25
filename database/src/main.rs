@@ -8,8 +8,7 @@ mod file_reader;
 //use easy_reader::EasyReader;
 use clap::Parser;
 use file_reader::EasyReader;
-use nulldb::NullDB;
-use std::sync::mpsc;
+use nulldb::{NullDB, create_db};
 mod errors;
 mod file_compactor;
 mod nulldb;
@@ -28,26 +27,7 @@ struct Args {
 async fn main() -> Result<(), std::io::Error> {
     let args = Args::parse();
 
-    // get main log file on fresh boot
-    let main_log = match utils::create_next_segment_file() {
-        Ok(main_log) => main_log,
-        Err(e) => {
-            panic!("Could not create new main log file! error: {}", e);
-        }
-    };
-
-    let null_db = NullDB::new(main_log);
-
-
-    let Ok(null_db) = null_db else {
-        panic!("Could not create indexes!!!");
-    };
-
-    let db_mutex = Data::new(null_db);
-    if args.compaction {
-        let (_, rx) = mpsc::channel();
-        let _file_compactor_thread = file_compactor::start_compaction(rx, db_mutex.clone());
-    }
+    let db_mutex = create_db(args.compaction).expect("could not start db");
 
     HttpServer::new(move || {
         App::new()
@@ -110,3 +90,76 @@ pub async fn compact_data(db: Data<NullDB>) -> impl Responder {
 
     HttpResponse::InternalServerError()
 }
+
+
+
+
+#[cfg(test)]
+mod tests {
+
+    use std::env;
+    use std::fs;
+    use super::utils;
+
+    use crate::nulldb::NullDB;
+    use crate::nulldb::create_db;
+
+    use rand::distributions::{Alphanumeric};
+    use rand::{thread_rng, Rng};
+    use actix_web::web::Data;
+    use tempfile::TempDir;
+    #[test]
+    fn get_value_for_key() {
+        if let Ok(path) = env::var("CARGO_MANIFEST_DIR") {
+            let tmp_dir = TempDir::new().expect("could not get temp dir");
+            let _workdir = setup_base_data(tmp_dir,path);
+
+            let db = create_db(false).expect("could not start database");
+
+            let result = db.get_value_for_key("name".to_string()).expect("should retrive value");
+
+            assert_eq!(result,"name:marek");
+        }
+    }
+
+    #[test]
+    fn test_put_get_key_multi() {
+        if let Ok(path) = env::var("CARGO_MANIFEST_DIR") {
+            // Create a directory inside of `std::env::temp_dir()`
+            let tmp_dir = TempDir::new().expect("could not get temp dir");
+            let _workdir = setup_base_data(tmp_dir,path);
+
+            let db = create_db(false).expect("could not start database");
+
+            put_lots_of_data(db.clone());
+            let result = db.get_value_for_key("name".to_string()).expect("should retrive value");
+
+            assert_eq!(result,"name:marek");
+        }
+    }
+
+    fn put_lots_of_data(ndb: Data<NullDB>) {
+        for _ in 1..1000{
+            ndb.write_value_to_log(get_random_string(3), get_random_string(10)).expect("failed to write to log");        
+        }
+    }
+
+    fn setup_base_data(dir: TempDir, cargo_path: String) {
+        assert!(env::set_current_dir(dir.path()).is_ok());
+
+        println!("{}",format!("{}/{}",cargo_path,"recources/test-segments/1-1.nullsegment"));
+        fs::copy(format!("{}/{}",cargo_path,"recources/test-segments/1-1.nullsegment"), "1-1.nullsegment").unwrap();
+        fs::copy(format!("{}/{}",cargo_path,"recources/test-segments/1-2.nullsegment"), "1-2.nullsegment").unwrap();
+        fs::copy(format!("{}/{}",cargo_path,"recources/test-segments/2-1.nullsegment"), "2-1.nullsegment").unwrap();
+    }
+
+    fn get_random_string(length: usize) -> String {
+        let chars: Vec<u8> = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(length)
+            .collect();
+        let s = std::str::from_utf8(&chars).unwrap().to_string();
+        return s;
+    }
+}
+

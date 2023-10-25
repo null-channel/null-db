@@ -3,7 +3,7 @@ use super::EasyReader;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path,PathBuf};
 
 use std::collections::HashMap;
 
@@ -26,6 +26,22 @@ pub fn get_all_files_by_ext(path: String, ext: String) -> std::io::Result<Vec<St
             return None;
         })
         .collect::<Vec<String>>();
+    return Ok(file_paths);
+}
+
+pub fn get_all_files_in_dir(path: String) -> std::io::Result<Vec<PathBuf>> {
+    let paths = std::fs::read_dir(path)?;
+    let file_paths = paths
+        .into_iter()
+        .flat_map(|x| {
+            match x {
+                Ok(y) => {
+                    return Some(y.path());
+                }
+                Err(_) => return None,
+            }
+        })
+        .collect::<Vec<PathBuf>>();
     return Ok(file_paths);
 }
 

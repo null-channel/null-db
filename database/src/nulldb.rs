@@ -5,9 +5,12 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::BufRead;
+use std::path::PathBuf;
 use std::sync::RwLock;
 use std::{fs::File, io::BufReader};
 use crate::index::*;
+use actix_web::web::Data;
+use std::sync::mpsc;
 
 pub struct NullDB {
     main_log_mutex: RwLock<String>,
@@ -16,6 +19,31 @@ pub struct NullDB {
     // Segment, Index 
     log_indexes: RwLock<HashMap<String, Index>>,
     
+}
+
+// TODO: pass in PathBuff to define where this database is working
+pub fn create_db(run_compaction: bool) -> anyhow::Result<Data<NullDB>> {
+
+    // get main log file on fresh boot
+    let main_log = match utils::create_next_segment_file() {
+        Ok(main_log) => main_log,
+        Err(e) => {
+            panic!("Could not create new main log file! error: {}", e);
+        }
+    };
+
+    let null_db = NullDB::new(main_log);
+
+    let Ok(null_db) = null_db else {
+        panic!("Could not create indexes!!!");
+    };
+
+    let db_arc = Data::new(null_db);
+    if run_compaction {
+        let (_, rx) = mpsc::channel();
+        let _file_compactor_thread = file_compactor::start_compaction(rx, db_arc.clone());
+    }
+    Ok(db_arc)
 }
 
 impl NullDB {
@@ -135,12 +163,14 @@ impl NullDB {
         }
 
         // Check if main log is "full"
-        if line_count > 5 {
+        if line_count > 128 {
             let main_log = self.main_log_mutex.write();
             let Ok(mut main_log) = main_log else {
                 return Err(anyhow!("Could not get main log file!"));
             };
-            let index = index::generate_index_for_segment(main_log.to_string());
+            let Some(index) = index::generate_index_for_segment(main_log.to_string()) else {
+                panic!("could not create index of main log");
+            };
             self.add_index(main_log.to_string(), index);
             
             let Ok(mut main_memory_log) = self.main_log_memory_mutex.write() else {

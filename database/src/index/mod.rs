@@ -35,19 +35,24 @@ pub fn generate_indexes(main_log: String) -> anyhow::Result<HashMap<String,Index
                 //file names: [gen]-[time].nullsegment
                 let path = format!("{}-{}", current_gen, file_path.clone());
 
+                if path.is_empty() {
+                    panic!("segment file path was bad");
+                }
                 // Don't check the main log, we already did that.
                 if path == *main_log {
                     continue;
                 }
 
-                indexes.insert(path.clone(), generate_index_for_segment(path));
+                if let Some(index) = generate_index_for_segment(path.clone()) {
+                    indexes.insert(path.clone(), index);
+                }
             }
         }
     }
     Ok(indexes)
 }
 
-pub fn generate_index_for_segment(segment_path: String) -> Index {
+pub fn generate_index_for_segment(segment_path: String) -> Option<Index> {
 
     let mut index = Index::new();
 
@@ -55,20 +60,30 @@ pub fn generate_index_for_segment(segment_path: String) -> Index {
         .read(true)
         .write(false)
         .open(segment_path.clone())
-        .expect("db pack file doesn't exist.");
+        .expect("db segment file doesn't exist.");
     let reader = BufReader::new(file);
 
     let mut line_num = 0;
-    for line in reader.lines() {
-        
+
+    let lines = reader.lines();
+
+    for line in lines {
         if let Ok(line) = line {
+            // A log file with nothing written to it is fine
+            // it will get deleted in next compaction
+            if line.len() == 0 {
+                println!("empty line detected");
+                continue;
+            }
             if let Ok(parsed_value) = utils::get_key_from_database_line(line) {
                 index.insert(parsed_value,line_num);
+            } else {
+                panic!("failed to parse database line to build index");
             }
         }
 
         line_num = line_num + 1;
     }
     println!("file: {}, index: {:?}", segment_path.clone(),index);
-    index
+    Some(index)
 }

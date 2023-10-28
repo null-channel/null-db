@@ -7,10 +7,7 @@ use std::path::{Path,PathBuf};
 
 use std::collections::HashMap;
 
-pub const TOMBSTONE: &'static str = "~tombstone~";
-pub const LOG_SEGMENT_EXT: &'static str = "nullsegment";
-
-pub fn get_all_files_by_ext(path: String, ext: String) -> std::io::Result<Vec<String>> {
+pub fn get_all_files_by_ext(path: &Path, ext: String) -> std::io::Result<Vec<String>> {
     let paths = std::fs::read_dir(path)?;
     let file_paths = paths
         .into_iter()
@@ -49,80 +46,14 @@ pub fn get_extension_from_filename(filename: &str) -> Option<&str> {
     Path::new(filename).extension().and_then(OsStr::to_str)
 }
 
-pub fn check_file_for_key(key: String, file: File) -> Result<String, errors::NullDbReadError> {
-    let mut reader = EasyReader::new(file).unwrap();
-    // Generate index (optional)
-    if let Err(e) = reader.build_index() {
-        return Err(errors::NullDbReadError::IOError(e));
-    }
-    reader.eof();
-    while let Some(line) = reader.prev_line().unwrap() {
-        let split = line.split(":").collect::<Vec<&str>>();
-        if split.len() != 2 {
-            continue;
-        }
-        if split[0] == key {
-            let val = split[1].to_string().clone();
-            if val == TOMBSTONE {
-                return Err(errors::NullDbReadError::ValueDeleted);
-            }
-            return Ok(split[1].to_string().clone());
-        }
-    }
-    return Err(errors::NullDbReadError::ValueNotFound);
-}
-
-
-pub fn get_value_from_database(value: String) -> anyhow::Result<String, errors::NullDbReadError> {
-    
-    let split = value.split(":").collect::<Vec<&str>>();
-    if split.len() != 2 {
-       return Err(errors::NullDbReadError::Corrupted); 
-    }
-
-    let val = split[1].to_string().clone();
-    if val == TOMBSTONE {
-        return Err(errors::NullDbReadError::ValueDeleted);
-    }
-
-    Ok(value)
-}
-
-pub fn get_key_from_database_line(value: String) -> anyhow::Result<String, errors::NullDbReadError> {
-    
-    let split = value.split(":").collect::<Vec<&str>>();
-    if split.len() != 2 {
-       return Err(errors::NullDbReadError::Corrupted); 
-    }
-
-    let val = split[1].to_string().clone();
-    if val == TOMBSTONE {
-        return Err(errors::NullDbReadError::ValueDeleted);
-    }
-
-    let key = split[0].to_string().clone();
-
-    Ok(key)
-}
-
 #[derive(Debug)]
 pub struct SegmentGenerationMapper {
     pub gen_name_segment_files: HashMap<i32, Vec<String>>,
     pub generations: HashSet<i32>,
 }
 
-pub fn create_next_segment_file() -> anyhow::Result<String> {
-    let time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let file_name = format!("{}-{}.{}", 0, time, LOG_SEGMENT_EXT);
-    let _file = File::create(file_name.clone())?;
-    Ok(file_name)
-}
-
-pub fn get_generations_segment_mapper(ext: String) -> anyhow::Result<SegmentGenerationMapper, errors::NullDbReadError> {
-    let segment_files = get_all_files_by_ext("./".to_owned(), ext).map_err(|e| errors::NullDbReadError::IOError(e))?;
+pub fn get_generations_segment_mapper(path: &Path, ext: String) -> anyhow::Result<SegmentGenerationMapper, errors::NullDbReadError> {
+    let segment_files = get_all_files_by_ext(path, ext).map_err(|e| errors::NullDbReadError::IOError(e))?;
 
     let mut generations = SegmentGenerationMapper {
         gen_name_segment_files: HashMap::new(),

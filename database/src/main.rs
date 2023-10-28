@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use actix_web::{
     delete, get, post,
     web::{self, Data},
@@ -8,7 +10,7 @@ mod file_reader;
 //use easy_reader::EasyReader;
 use clap::Parser;
 use file_reader::EasyReader;
-use nulldb::{NullDB, create_db};
+use nulldb::{NullDB,Config, create_db};
 mod errors;
 mod file_compactor;
 mod nulldb;
@@ -21,13 +23,17 @@ mod index;
 struct Args {
     #[clap(short, long)]
     compaction: bool,
+    #[clap(short,long)]
+    #[arg(default_value=get_work_dir().into_os_string())]
+    dir: PathBuf,
 }
 
 #[actix_web::main]
 async fn main() -> Result<(), std::io::Error> {
     let args = Args::parse();
 
-    let db_mutex = create_db(args.compaction).expect("could not start db");
+    let config = Config::new(args.dir , args.compaction);
+    let db_mutex = create_db(config).expect("could not start db");
 
     HttpServer::new(move || {
         App::new()
@@ -40,6 +46,10 @@ async fn main() -> Result<(), std::io::Error> {
     .bind("127.0.0.1:8080")?
     .run()
     .await
+}
+
+fn get_work_dir() -> PathBuf {
+   std::env::current_dir().unwrap()
 }
 
 #[get("/v1/data/{key}")]
@@ -91,30 +101,30 @@ pub async fn compact_data(db: Data<NullDB>) -> impl Responder {
     HttpResponse::InternalServerError()
 }
 
-
-
-
 #[cfg(test)]
 mod tests {
 
     use std::env;
     use std::fs;
-    use super::utils;
+    use std::path;
+    use std::path::PathBuf;
 
+    use crate::nulldb::Config;
     use crate::nulldb::NullDB;
     use crate::nulldb::create_db;
 
-    use rand::distributions::{Alphanumeric};
-    use rand::{thread_rng, Rng};
+    use rand::distributions::Alphanumeric;
+    use rand::Rng;
     use actix_web::web::Data;
     use tempfile::TempDir;
     #[test]
     fn get_value_for_key() {
-        if let Ok(path) = env::var("CARGO_MANIFEST_DIR") {
+        if let Ok(cargo_path) = env::var("CARGO_MANIFEST_DIR") {
             let tmp_dir = TempDir::new().expect("could not get temp dir");
-            let _workdir = setup_base_data(tmp_dir,path);
+            let _workdir = setup_base_data(tmp_dir.path(),cargo_path);
 
-            let db = create_db(false).expect("could not start database");
+            let config = Config::new(tmp_dir.into_path(), false);
+            let db = create_db(config).expect("could not start database");
 
             let result = db.get_value_for_key("name".to_string()).expect("should retrive value");
 
@@ -127,9 +137,10 @@ mod tests {
         if let Ok(path) = env::var("CARGO_MANIFEST_DIR") {
             // Create a directory inside of `std::env::temp_dir()`
             let tmp_dir = TempDir::new().expect("could not get temp dir");
-            let _workdir = setup_base_data(tmp_dir,path);
+            let _workdir = setup_base_data(tmp_dir.path(),path);
 
-            let db = create_db(false).expect("could not start database");
+            let config = Config::new(tmp_dir.into_path(), false);
+            let db = create_db(config).expect("could not start database");
 
             put_lots_of_data(db.clone());
             let result = db.get_value_for_key("name".to_string()).expect("should retrive value");
@@ -139,18 +150,26 @@ mod tests {
     }
 
     fn put_lots_of_data(ndb: Data<NullDB>) {
-        for _ in 1..1000{
+        for _ in 1..1000000{
             ndb.write_value_to_log(get_random_string(3), get_random_string(10)).expect("failed to write to log");        
         }
     }
 
-    fn setup_base_data(dir: TempDir, cargo_path: String) {
-        assert!(env::set_current_dir(dir.path()).is_ok());
+    fn setup_base_data(dir: &path::Path, cargo_path: String) {
 
         println!("{}",format!("{}/{}",cargo_path,"recources/test-segments/1-1.nullsegment"));
-        fs::copy(format!("{}/{}",cargo_path,"recources/test-segments/1-1.nullsegment"), "1-1.nullsegment").unwrap();
-        fs::copy(format!("{}/{}",cargo_path,"recources/test-segments/1-2.nullsegment"), "1-2.nullsegment").unwrap();
-        fs::copy(format!("{}/{}",cargo_path,"recources/test-segments/2-1.nullsegment"), "2-1.nullsegment").unwrap();
+        println!("{}", get_dir(dir,"1-1.nullsegment").to_str().unwrap());
+        
+        fs::copy(format!("{}/{}",cargo_path,"recources/test-segments/1-1.nullsegment"), get_dir(dir,"1-1.nullsegment")).unwrap();
+        fs::copy(format!("{}/{}",cargo_path,"recources/test-segments/1-2.nullsegment"), get_dir(dir,"1-2.nullsegment")).unwrap();
+        fs::copy(format!("{}/{}",cargo_path,"recources/test-segments/2-1.nullsegment"), get_dir(dir,"2-1.nullsegment")).unwrap();
+    }
+
+    fn get_dir(d: &path::Path, name: &str) -> PathBuf {
+        let mut dir = PathBuf::new();
+        dir.push(d);
+        dir.push(name);
+        dir
     }
 
     fn get_random_string(length: usize) -> String {
@@ -162,4 +181,3 @@ mod tests {
         return s;
     }
 }
-

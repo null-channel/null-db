@@ -14,6 +14,7 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Write;
 use std::mem;
+use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::TryRecvError;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -44,7 +45,8 @@ pub async fn start_compaction(rx: Receiver<i32>, db: Data<NullDB>) {
 }
 
 pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
-    let segment_files = utils::get_all_files_by_ext("./".to_owned(), SEGMENT_FILE_EXT.to_owned())?;
+
+    let segment_files = utils::get_all_files_by_ext(db.get_db_path().as_path(), SEGMENT_FILE_EXT.to_owned())?;
 
     // stores the files for a generation
     let mut gen_name_segment_files: HashMap<i32, Vec<String>> = HashMap::new();
@@ -82,7 +84,7 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
 
     /* Setup the variables */
     let data: &mut HashSet<record::Record> = &mut HashSet::new();
-    let mut compacted_files: Vec<String> = Vec::new();
+    let mut compacted_files: Vec<PathBuf> = Vec::new();
 
     //Umm... I don't know if this is the best way to do this. it's what I did though, help me?
     let mut gen_iter = gen_vec.into_iter();
@@ -111,12 +113,12 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
             // This is the opisite of the "get value" function as we want to go oldest to newest!
             while let Some(file_path) = file_name_iter.next() {
                 //file names: [gen]-[time].nullsegment
-                let path = format!("{}-{}", current_gen, file_path.clone());
+                let path = db.get_path_for_file(format!("{}-{}", current_gen, file_path.clone()));
                 if path == main_log_file_name {
                     println!("Skipping main log file");
                     continue;
                 };
-                println!("{}", path);
+                println!("{:?}", path);
 
                 let file = OpenOptions::new()
                     .read(true)
@@ -149,7 +151,7 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
                     // Calculate file generation
                     let file_gen = current_gen + 1;
                     println!("===========I DO NOT RUN============");
-                    let new_segment_name = generate_segment_file_name(file_gen);
+                    let new_segment_name = generate_segment_file_name(db.get_db_path(), file_gen);
                     // Create new file
                     let mut new_file = OpenOptions::new()
                         .write(true)
@@ -165,11 +167,11 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
                         }
                     }
 
-                    let Some(index) = generate_index_for_segment(new_segment_name.clone()) else {
+                    let Some(index) = generate_index_for_segment(&new_segment_name) else {
                         panic!("could not generate index of compacted file");
                     };
                     db.add_index(new_segment_name.clone(), index);
-                    println!("saved new segment index: {}", new_segment_name.clone());
+                    println!("saved new segment index: {:?}", new_segment_name.clone());
 
                     eprintln!("files to be deleted: {:?}", compacted_files);
                     for f in &compacted_files {
@@ -198,7 +200,7 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
         let file_gen = 1;
 
         // current time
-        let new_segment_name = generate_segment_file_name(file_gen);
+        let new_segment_name = generate_segment_file_name(db.get_db_path(), file_gen);
         // Create new file
         let mut new_file = OpenOptions::new()
             .write(true)
@@ -214,7 +216,7 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
             }
         }
 
-        let Some(index) = generate_index_for_segment(new_segment_name.clone()) else {
+        let Some(index) = generate_index_for_segment(&new_segment_name) else {
             panic!("failed to create index for new log segment");
         };
         db.add_index(new_segment_name.clone(), index);
@@ -234,42 +236,14 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
 }
 
 
-fn generate_segment_file_name(file_gen: i32) -> String {
-        let start = SystemTime::now();
-        let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
-        format!("{}-{:?}.nullsegment", file_gen,since_the_epoch)
+fn generate_segment_file_name(base_path: PathBuf,file_gen: i32) -> PathBuf {
+    let start = SystemTime::now();
+    let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
+    let name = format!("{}-{:?}.nullsegment", file_gen,since_the_epoch);
+    
+    let mut path = PathBuf::new();
+    path.push(base_path);
+    path.push(name);
+    path
 }
 
-/* TODO: Delete me
-fn get_generation_from_filename(filename: &str) -> &str {
-    let file_name = Path::new(filename)
-        .file_name().unwrap()
-        .to_str().unwrap();
-    let split = file_name.split("-").collect::<Vec<&str>>();
-    return split[0];
-}
-
-fn get_extension_from_filename(filename: &str) -> Option<&str> {
-    Path::new(filename)
-        .extension()
-        .and_then(OsStr::to_str)
-}
- */
-/*
-* This test hearts my soul. It made me regret much.
-* Sadly it's all I have time for if I want to get this video out.
-* so it's what we get. deal with it.
-* The whole compaction function needs refactored to make this better.
-* and that would be good, but a whole video in and of it'self.
-* maybe the next video?
-*/
-#[cfg(test)]
-mod tests {
-    use super::compactor;
-    use super::utils;
-    use std::env;
-    use std::fs;
-    #[test]
-    fn compation() {
-    }
-}

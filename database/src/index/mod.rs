@@ -86,6 +86,6 @@ pub fn generate_index_for_segment(segment_path: &PathBuf) -> Option<Index> {
 
         line_num = line_num + 1;
     }
-    println!("file: {:?}, index: {:?}", segment_path.clone(),index);
+    //println!("file: {:?}, index: {:?}", segment_path.clone(),index);
     Some(index)
 }

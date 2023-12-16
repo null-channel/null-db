@@ -82,12 +82,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Get { key, host } => {
+            let then = time::Instant::now();
             println!("getting data for key {}", key);
             let resp = reqwest::get(format!("http://{}:8080/{}/{}\n", host, "v1/data", key))
                 .await?
                 .text()
                 .await?;
-            println!("key {}:{}", key, resp)
+            println!("key {}:{}", key, resp);
+            let dur: u64 = ((time::Instant::now() - then).as_millis())
+                .try_into()
+                .unwrap();
+            println!("duration: {}", dur);
         }
 
         Commands::Delete { key, host } => {
@@ -138,8 +143,8 @@ async fn benchmark(records: i32, duration: i32, host: String) -> Option<()> {
         for _ in 0..records {
             let ret = client
                 .post(
-                    get_random_string(1),
-                    get_random_string(rng.gen_range(5..50)),
+                    get_random_string(rng.gen_range(1..10)),
+                    get_random_string(rng.gen_range(50..500)),
                 )
                 .await;
             if ret.is_err() {

@@ -6,6 +6,9 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder, Result,
 };
 extern crate lazy_static;
+
+use std::convert::TryInto;
+use std::time;
 mod file_reader;
 //use easy_reader::EasyReader;
 use clap::Parser;
@@ -55,8 +58,15 @@ fn get_work_dir() -> PathBuf {
 #[get("/v1/data/{key}")]
 async fn get_value_for_key(db: Data<NullDB>, request: web::Path<String>) -> impl Responder {
     let key = request.into_inner();
+
+    let then = time::Instant::now();
+            
     let ret = db.get_value_for_key(key.clone());
 
+    let dur: u128 = ((time::Instant::now() - then).as_millis())                
+        .try_into()
+        .unwrap();
+    println!("duration: {}", dur);
     match ret {
         Err(e) => {
             HttpResponse::InternalServerError().body(format!("Issue getting value for key: {}", e))
@@ -108,13 +118,13 @@ mod tests {
     use std::fs;
     use std::path;
     use std::path::PathBuf;
+    use rand::{thread_rng, Rng};
 
     use crate::nulldb::Config;
     use crate::nulldb::NullDB;
     use crate::nulldb::create_db;
 
     use rand::distributions::Alphanumeric;
-    use rand::Rng;
     use actix_web::web::Data;
     use tempfile::TempDir;
     #[test]
@@ -142,16 +152,45 @@ mod tests {
             let config = Config::new(tmp_dir.into_path(), false);
             let db = create_db(config).expect("could not start database");
 
-            put_lots_of_data(db.clone());
+            put_lots_of_data(&db, 10000);
             let result = db.get_value_for_key("name".to_string()).expect("should retrive value");
 
             assert_eq!(result,"name:marek");
         }
     }
 
-    fn put_lots_of_data(ndb: Data<NullDB>) {
-        for _ in 1..1000000{
-            ndb.write_value_to_log(get_random_string(3), get_random_string(10)).expect("failed to write to log");        
+    #[test]
+    fn test_average_insert_time_one_million() {
+    
+        if let Ok(path) = env::var("CARGO_MANIFEST_DIR") {
+            // Create a directory inside of `std::env::temp_dir()`
+            let tmp_dir = TempDir::new().expect("could not get temp dir");
+            let _workdir = setup_base_data(tmp_dir.path(),path);
+
+            let config = Config::new(tmp_dir.into_path(), false);
+            let db = create_db(config).expect("could not start database");
+
+
+            for i in 0..10 {
+                let start = std::time::Instant::now();
+
+                put_lots_of_data(&db, 10000);
+
+                let end = (std::time::Instant::now() - start).as_millis();
+                println!("iteration {}(ms): {}",i, end);
+            }
+
+            let start = std::time::Instant::now();
+            let _result = db.get_value_for_key("name".to_string()).expect("should retrive value");
+            let end = (std::time::Instant::now() - start).as_nanos();
+            println!("get value for name duration nanos: {}", end);
+        }
+    }
+
+    fn put_lots_of_data(ndb: &Data<NullDB>, counter: i32) {
+        let mut rng = thread_rng();
+        for _ in 0..counter{
+            ndb.write_value_to_log(get_random_string(rng.gen_range(1..10)), get_random_string(10)).expect("failed to write to log");        
         }
     }
 

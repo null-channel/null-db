@@ -12,6 +12,8 @@ use crate::index::*;
 use actix_web::web::Data;
 use std::sync::mpsc;
 use crate::EasyReader;
+use std::convert::TryInto;
+use std::time;
 
 pub const TOMBSTONE: &'static str = "~tombstone~";
 pub const LOG_SEGMENT_EXT: &'static str = "nullsegment";
@@ -160,6 +162,9 @@ impl NullDB {
             {
                 file_name_vec.sort_unstable();
                 let mut file_name_iter = file_name_vec.into_iter();
+
+                let then = time::Instant::now();
+            
                 while let Some(file_path) = file_name_iter.next_back() {
                     //file names: [gen]-[time].nullsegment
                     let path = self.get_path_for_file(format!("{}-{}", current_gen, file_path.clone()));
@@ -183,22 +188,25 @@ impl NullDB {
                     };
 
                     let Some(line_number) = index.get(&key) else {
-                        println!("key: {}, not found in index: {:?}", key.clone(), index );
                         continue;
                     };
 
                     println!("record found, file:{:?}, line_number:{}", path.clone(),line_number);
-
+                    let dur: u128 = ((time::Instant::now() - then).as_millis())                
+                        .try_into()
+                        .unwrap();
+                    println!("inner dur: {}", dur);
                     return get_value_from_segment(path, *line_number);
                 }
+                
             }
+            
         }
         Ok("value not found".into())
     }
 
     // Writes value to log, will create new log if over 64 lines.
     pub fn write_value_to_log(&self, key: String, value: String) -> anyhow::Result<()> {
-        println!("Writing to log: {}", value);
         let line_count;
         {
             let main_log = self.main_log_mutex.read();
@@ -213,7 +221,7 @@ impl NullDB {
         }
 
         // Check if main log is "full"
-        if line_count > 128 {
+        if line_count > 5120 {
             let main_log = self.main_log_mutex.write();
             let Ok(mut main_log) = main_log else {
                 return Err(anyhow!("Could not get main log file!"));

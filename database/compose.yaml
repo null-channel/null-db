@@ -1,0 +1,30 @@
+services:
+  node1:
+    build: .
+    command: 'null-db --roster=node2:3001,node3:3002 --id=3000'
+    ports:
+      - 3000:3000
+    develop:
+      watch:
+        - action: rebuild
+          path: . 
+
+  node2:
+    build: .
+    command: 'null-db --roster=node1:3000,node3:3002 --id=3001'
+    ports:
+      - 3001:3001
+    develop:
+      watch:
+        - action: rebuild
+          path: . 
+
+  node3:
+    build: .
+    command: 'null-db --roster=node2:3001,node1:3000 --id=3002'
+    ports:
+      - 3002:3002
+    develop:
+      watch:
+        - action: rebuild
+          path: . 

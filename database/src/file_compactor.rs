@@ -20,7 +20,6 @@ use std::sync::mpsc::TryRecvError;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{thread, time};
 
-
 pub const SEGMENT_FILE_EXT: &'static str = "nullsegment";
 const MAX_FILE_SIZE: &'static usize = &(1 * 1024); //1kb block
 
@@ -45,8 +44,8 @@ pub async fn start_compaction(rx: Receiver<i32>, db: Data<NullDB>) {
 }
 
 pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
-
-    let segment_files = utils::get_all_files_by_ext(db.get_db_path().as_path(), SEGMENT_FILE_EXT.to_owned())?;
+    let segment_files =
+        utils::get_all_files_by_ext(db.get_db_path().as_path(), SEGMENT_FILE_EXT.to_owned())?;
 
     // stores the files for a generation
     let mut gen_name_segment_files: HashMap<i32, Vec<String>> = HashMap::new();
@@ -235,15 +234,13 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
     return Ok(());
 }
 
-
-fn generate_segment_file_name(base_path: PathBuf,file_gen: i32) -> PathBuf {
+fn generate_segment_file_name(base_path: PathBuf, file_gen: i32) -> PathBuf {
     let start = SystemTime::now();
     let since_the_epoch = start.duration_since(UNIX_EPOCH).unwrap();
-    let name = format!("{}-{:?}.nullsegment", file_gen,since_the_epoch);
-    
+    let name = format!("{}-{:?}.nullsegment", file_gen, since_the_epoch);
+
     let mut path = PathBuf::new();
     path.push(base_path);
     path.push(name);
     path
 }
-

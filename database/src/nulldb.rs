@@ -1,19 +1,19 @@
 use crate::index;
+use crate::index::*;
+use crate::EasyReader;
 use crate::{errors, file_compactor, utils};
+use actix_web::web::Data;
 use anyhow::anyhow;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::BufRead;
-use std::path::{PathBuf, Path};
-use std::sync::RwLock;
-use std::{fs::File, io::BufReader};
-use crate::index::*;
-use actix_web::web::Data;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use crate::EasyReader;
-use std::convert::TryInto;
+use std::sync::RwLock;
 use std::time;
+use std::{fs::File, io::BufReader};
 
 pub const TOMBSTONE: &'static str = "~tombstone~";
 pub const LOG_SEGMENT_EXT: &'static str = "nullsegment";
@@ -22,12 +22,12 @@ pub struct NullDB {
     main_log_mutex: RwLock<PathBuf>,
     main_log_file_mutex: RwLock<bool>,
     main_log_memory_mutex: RwLock<HashMap<String, String>>,
-    // Segment, Index 
+    // Segment, Index
     log_indexes: RwLock<HashMap<PathBuf, Index>>,
     pub config: RwLock<Config>,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     path: PathBuf,
     compaction: bool,
@@ -41,7 +41,6 @@ impl Config {
 
 // TODO: pass in PathBuff to define where this database is working
 pub fn create_db(config: Config) -> anyhow::Result<Data<NullDB>> {
-
     let null_db = NullDB::new(config.clone());
 
     let Ok(null_db) = null_db else {
@@ -73,14 +72,14 @@ impl NullDB {
         path
     }
 
-    pub fn new(config: Config) -> anyhow::Result<NullDB,errors::NullDbReadError> {
+    pub fn new(config: Config) -> anyhow::Result<NullDB, errors::NullDbReadError> {
         let main_log = match Self::create_next_segment_file(config.path.as_path()) {
             Ok(main_log) => main_log,
             Err(e) => {
                 panic!("Could not create new main log file! error: {}", e);
             }
         };
-        let indexes = RwLock::new(generate_indexes(config.path.as_path(),&main_log)?);
+        let indexes = RwLock::new(generate_indexes(config.path.as_path(), &main_log)?);
         Ok(NullDB {
             main_log_mutex: RwLock::new(main_log),
             main_log_file_mutex: RwLock::new(false),
@@ -116,7 +115,10 @@ impl NullDB {
         self.write_value_to_log(key, TOMBSTONE.into())
     }
 
-    pub fn get_value_for_key(&self, key: String) -> anyhow::Result<String, errors::NullDbReadError> {
+    pub fn get_value_for_key(
+        &self,
+        key: String,
+    ) -> anyhow::Result<String, errors::NullDbReadError> {
         // Aquire read lock on main log in memory
         let Ok(main_log) = self.main_log_memory_mutex.read() else {
             println!("Could not get main log file!");
@@ -134,8 +136,10 @@ impl NullDB {
             panic!("we have poisiod our locks");
         };
         // If not in main log, check all the segments
-        let mut generation_mapper =
-            utils::get_generations_segment_mapper(config.path.as_path(), file_compactor::SEGMENT_FILE_EXT.to_owned())?;
+        let mut generation_mapper = utils::get_generations_segment_mapper(
+            config.path.as_path(),
+            file_compactor::SEGMENT_FILE_EXT.to_owned(),
+        )?;
 
         /*
          * unstable is faster, but could reorder "same" values.
@@ -164,10 +168,11 @@ impl NullDB {
                 let mut file_name_iter = file_name_vec.into_iter();
 
                 let then = time::Instant::now();
-            
+
                 while let Some(file_path) = file_name_iter.next_back() {
                     //file names: [gen]-[time].nullsegment
-                    let path = self.get_path_for_file(format!("{}-{}", current_gen, file_path.clone()));
+                    let path =
+                        self.get_path_for_file(format!("{}-{}", current_gen, file_path.clone()));
 
                     // Don't check the main log, we already did that.
                     if path == *main_log_filename {
@@ -178,9 +183,9 @@ impl NullDB {
                     let Ok(log_index) = self.log_indexes.read() else {
                         panic!("could not optain read log on indexes");
                     };
-                        
+
                     let index = log_index.get(&path);
-                    
+
                     let Some(index) = index else {
                         println!("{:?}", log_index);
                         println!("{:?}", path);
@@ -191,16 +196,18 @@ impl NullDB {
                         continue;
                     };
 
-                    println!("record found, file:{:?}, line_number:{}", path.clone(),line_number);
-                    let dur: u128 = ((time::Instant::now() - then).as_millis())                
+                    println!(
+                        "record found, file:{:?}, line_number:{}",
+                        path.clone(),
+                        line_number
+                    );
+                    let dur: u128 = ((time::Instant::now() - then).as_millis())
                         .try_into()
                         .unwrap();
                     println!("inner dur: {}", dur);
                     return get_value_from_segment(path, *line_number);
                 }
-                
             }
-            
         }
         Ok("value not found".into())
     }
@@ -230,7 +237,7 @@ impl NullDB {
                 panic!("could not create index of main log");
             };
             self.add_index(main_log.clone(), index);
-            
+
             let Ok(mut main_memory_log) = self.main_log_memory_mutex.write() else {
                 println!("Could not get main log file!");
                 panic!("we have poisiod our locks");
@@ -299,7 +306,10 @@ impl NullDB {
     }
 }
 
-fn get_value_from_segment(path: PathBuf, line_number: usize ) -> anyhow::Result<String,errors::NullDbReadError> {
+fn get_value_from_segment(
+    path: PathBuf,
+    line_number: usize,
+) -> anyhow::Result<String, errors::NullDbReadError> {
     let file = OpenOptions::new()
         .read(true)
         .write(false)
@@ -307,7 +317,7 @@ fn get_value_from_segment(path: PathBuf, line_number: usize ) -> anyhow::Result<
         .expect("db pack file doesn't exist.");
 
     let bb = BufReader::new(file);
-    let mut buffer_iter = bb.lines();                   
+    let mut buffer_iter = bb.lines();
     // .nth -> Option<Result<String,Err>>
     let value = buffer_iter.nth(line_number).expect("index missed");
 
@@ -321,10 +331,9 @@ fn get_value_from_segment(path: PathBuf, line_number: usize ) -> anyhow::Result<
 }
 
 pub fn get_value_from_database(value: String) -> anyhow::Result<String, errors::NullDbReadError> {
-    
     let split = value.split(":").collect::<Vec<&str>>();
     if split.len() != 2 {
-       return Err(errors::NullDbReadError::Corrupted); 
+        return Err(errors::NullDbReadError::Corrupted);
     }
 
     let val = split[1].to_string().clone();
@@ -335,11 +344,12 @@ pub fn get_value_from_database(value: String) -> anyhow::Result<String, errors::
     Ok(value)
 }
 
-pub fn get_key_from_database_line(value: String) -> anyhow::Result<String, errors::NullDbReadError> {
-    
+pub fn get_key_from_database_line(
+    value: String,
+) -> anyhow::Result<String, errors::NullDbReadError> {
     let split = value.split(":").collect::<Vec<&str>>();
     if split.len() != 2 {
-       return Err(errors::NullDbReadError::Corrupted); 
+        return Err(errors::NullDbReadError::Corrupted);
     }
 
     let val = split[1].to_string().clone();
@@ -374,4 +384,3 @@ pub fn check_file_for_key(key: String, file: File) -> Result<String, errors::Nul
     }
     return Err(errors::NullDbReadError::ValueNotFound);
 }
-

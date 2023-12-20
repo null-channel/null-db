@@ -3,7 +3,7 @@ use super::EasyReader;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::path::{Path,PathBuf};
+use std::path::{Path, PathBuf};
 
 use std::collections::HashMap;
 
@@ -30,13 +30,11 @@ pub fn get_all_files_in_dir(path: String) -> std::io::Result<Vec<PathBuf>> {
     let paths = std::fs::read_dir(path)?;
     let file_paths = paths
         .into_iter()
-        .flat_map(|x| {
-            match x {
-                Ok(y) => {
-                    return Some(y.path());
-                }
-                Err(_) => return None,
+        .flat_map(|x| match x {
+            Ok(y) => {
+                return Some(y.path());
             }
+            Err(_) => return None,
         })
         .collect::<Vec<PathBuf>>();
     return Ok(file_paths);
@@ -52,8 +50,12 @@ pub struct SegmentGenerationMapper {
     pub generations: HashSet<i32>,
 }
 
-pub fn get_generations_segment_mapper(path: &Path, ext: String) -> anyhow::Result<SegmentGenerationMapper, errors::NullDbReadError> {
-    let segment_files = get_all_files_by_ext(path, ext).map_err(|e| errors::NullDbReadError::IOError(e))?;
+pub fn get_generations_segment_mapper(
+    path: &Path,
+    ext: String,
+) -> anyhow::Result<SegmentGenerationMapper, errors::NullDbReadError> {
+    let segment_files =
+        get_all_files_by_ext(path, ext).map_err(|e| errors::NullDbReadError::IOError(e))?;
 
     let mut generations = SegmentGenerationMapper {
         gen_name_segment_files: HashMap::new(),
@@ -82,5 +84,5 @@ pub fn get_generations_segment_mapper(path: &Path, ext: String) -> anyhow::Resul
         }
     }
 
-    return Ok(generations)
+    return Ok(generations);
 }

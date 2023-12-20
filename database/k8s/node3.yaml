@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: nulldb3
+  name: nulldb3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nulldb3
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: nulldb3
+    spec:
+      containers:
+      - image: nulldb
+        name: nulldb
+        resources: {}
+status: {}

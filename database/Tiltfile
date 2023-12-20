@@ -1,0 +1,5 @@
+# api service
+docker_build("nulldb",".")
+k8s_yaml('./k8s/node1.yaml')
+k8s_yaml('./k8s/node2.yaml')
+k8s_yaml('./k8s/node3.yaml')

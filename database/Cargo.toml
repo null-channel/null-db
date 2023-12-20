@@ -1,17 +1,24 @@
 [package]
-name = "disk-log"
+name = "null-db"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.1.8", features = ["derive","string"]}
+clap = { version = "4.4.10", features = ["derive","string"]}
 actix-web = "4.3.1"
 serde = "1"
 lazy_static = "1.4.0"
 easy_reader = "0.5.1"
 fnv = "1.0.7"
 anyhow = "1"
-rand = "0.8.5"
 tempfile = "3.8.0"
+prost = "0.12"
+tonic = { version = "0.10.2" }
+tokio = { version = "1.26.0", features = ["full"] }
+rand = "0.8.5"
+rand_chacha = "0.3.1"
+
+[build-dependencies]
+tonic-build = { version = "0.10.2", features = ["prost"] }

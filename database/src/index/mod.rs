@@ -1,16 +1,20 @@
+use crate::{errors, nulldb};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use crate::{errors, nulldb};
 
 use super::utils::get_generations_segment_mapper;
 use std::fs::OpenOptions;
 use std::io::{prelude::*, BufReader};
 
-pub type Index = HashMap<String,usize>;
+pub type Index = HashMap<String, usize>;
 
-pub fn generate_indexes(path: &Path, main_log: &Path) -> anyhow::Result<HashMap<PathBuf,Index>,errors::NullDbReadError> {
+pub fn generate_indexes(
+    path: &Path,
+    main_log: &Path,
+) -> anyhow::Result<HashMap<PathBuf, Index>, errors::NullDbReadError> {
     let mut indexes = HashMap::new();
-    let mut generation_mapper = get_generations_segment_mapper(path,super::nulldb::LOG_SEGMENT_EXT.to_owned())?;
+    let mut generation_mapper =
+        get_generations_segment_mapper(path, super::nulldb::LOG_SEGMENT_EXT.to_owned())?;
     /*
      * unstable is faster, but could reorder "same" values.
      * We will not have same values as this was from a set.
@@ -54,10 +58,12 @@ pub fn generate_indexes(path: &Path, main_log: &Path) -> anyhow::Result<HashMap<
 }
 
 pub fn generate_index_for_segment(segment_path: &PathBuf) -> Option<Index> {
-
     let mut index = Index::new();
 
-    println!("File path for generate_index_for_segment: {:?}", segment_path);
+    println!(
+        "File path for generate_index_for_segment: {:?}",
+        segment_path
+    );
     let file = OpenOptions::new()
         .read(true)
         .write(false)
@@ -78,7 +84,7 @@ pub fn generate_index_for_segment(segment_path: &PathBuf) -> Option<Index> {
                 continue;
             }
             if let Ok(parsed_value) = nulldb::get_key_from_database_line(line) {
-                index.insert(parsed_value,line_num);
+                index.insert(parsed_value, line_num);
             } else {
                 panic!("failed to parse database line to build index");
             }

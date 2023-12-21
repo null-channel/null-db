@@ -21,12 +21,23 @@ enum Commands {
         value: String,
         #[clap(long, default_value = "localhost")]
         host: String,
+        #[clap(long, default_value = "8080")]
+        port: String,
     },
 
     Get {
         key: String,
         #[clap(long, default_value = "localhost")]
         host: String,
+        #[clap(long, default_value = "8080")]
+        port: String,
+    },
+
+    Test {
+        #[clap(long, default_value = "localhost")]
+        host: String,
+        #[clap(long, default_value = "8080")]
+        port: String,
     },
 
     Delete {
@@ -47,6 +58,8 @@ enum Commands {
     Compact {
         #[clap(long, default_value = "localhost")]
         host: String,
+        #[clap(long, default_value = "8080")]
+        port: String,
     },
 }
 
@@ -66,12 +79,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Cli::parse();
 
     match &args.command {
-        Commands::Put { key, value, host } => {
+        Commands::Put { key, value, host, port } => {
             println!("putting data {}", value);
+            println!("connecting at: {}",format!("http://{}:{}/{}/{}", host, port, "v1/data", key));
             let client = reqwest::Client::new();
             let data = value.clone();
             let resp = client
-                .post(format!("http://{}:8080/{}/{}\n", host, "v1/data", key))
+                .post(format!("http://{}:{}/{}/{}", host, port, "v1/data", key))
                 .body(data)
                 .send()
                 .await?
@@ -81,10 +95,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", resp)
         }
 
-        Commands::Get { key, host } => {
+        Commands::Test { host, port } => {
+            println!("testing data");
+            let client = reqwest::Client::new();
+            let resp = client
+                .get(format!("http://{}:{}/", host, port))
+                .send()
+                .await?
+                .text()
+                .await?;
+
+            println!("{}", resp)
+        }
+
+        Commands::Get { key, host, port } => {
             let then = time::Instant::now();
             println!("getting data for key {}", key);
-            let resp = reqwest::get(format!("http://{}:8080/{}/{}\n", host, "v1/data", key))
+            let resp = reqwest::get(format!("http://{}:{}/{}/{}\n", host,port, "v1/data", key))
                 .await?
                 .text()
                 .await?;
@@ -115,11 +142,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             benchmark(*records, *duration, host.to_string()).await;
         }
 
-        Commands::Compact { host } => {
+        Commands::Compact { host, port } => {
             println!("Making a compation request!");
             let _resp = reqwest::get(format!(
-                "http://{}:8080/{}\n",
-                host, "v1/management/compact"
+                "http://{}:{}/{}\n",
+                host,port, "v1/management/compact"
             ))
             .await?
             .text()

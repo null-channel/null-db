@@ -4,6 +4,7 @@ services:
     command: 'null-db --roster=node2:3001,node3:3002 --id=3000'
     ports:
       - 3000:3000
+      - 30001:8080
     develop:
       watch:
         - action: rebuild
@@ -14,6 +15,7 @@ services:
     command: 'null-db --roster=node1:3000,node3:3002 --id=3001'
     ports:
       - 3001:3001
+      - 30011:8080
     develop:
       watch:
         - action: rebuild
@@ -24,6 +26,7 @@ services:
     command: 'null-db --roster=node2:3001,node1:3000 --id=3002'
     ports:
       - 3002:3002
+      - 30021:8080
     develop:
       watch:
         - action: rebuild

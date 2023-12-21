@@ -14,7 +14,7 @@ pub mod raft {
     tonic::include_proto!("raft");
 }
 pub mod config;
-mod grpcserver;
+pub mod grpcserver;
 use config::RaftConfig;
 
 use crate::raft::grpcserver::RaftGRPCServer;
@@ -110,10 +110,72 @@ impl RaftNode {
                 });
                 let _response = node.append_entries(request).await.unwrap();
             }
-            // Send heartbeats to all other nodes
-            break;
+
+            match self.receiver.try_recv() {
+                Ok(RaftEvent::VoteRequest(request, sender)) => {
+                    println!("Got a vote request: {:?}", request);
+                    if request.term > self.current_term {
+                        self.current_term = request.term;
+                        let reply = raft::VoteReply {
+                            term: self.current_term,
+                            vote_granted: true,
+                        };
+                        sender.send(reply).unwrap();
+                        return State::Follower;
+                    }
+                }
+                Ok(RaftEvent::AppendEntriesRequest(request, sender)) => {
+                    println!("Got an append entries request: {:?}", request);
+                    let reply = raft::AppendEntriesReply {
+                        term: self.current_term,
+                        success: true,
+                    };
+                    sender.send(reply).unwrap();
+                    println!("Becoming Follower again. Failed to become leader because a leader already exists. +++++++!!!!!!!!!+++++++");
+                }
+                Ok(RaftEvent::NewEntry(entry,sender)) => {
+                    println!("Got a new entry: {:?}", entry);
+                    //log entry
+                    self.log.push(entry.clone());
+                    self.log_index += 1;
+
+                    let mut success = 1;
+                    // Send append entries to all other nodes
+                    for nodes in self.raft_clients.values_mut() {
+                        let mut node = nodes.clone();
+                        let request = tonic::Request::new(raft::AppendEntriesRequest {
+                            term: self.current_term,
+                            leader_id: self.config.candidate_id.clone().parse().unwrap(),
+                            prev_log_index: self.log_index,
+                            prev_log_term: self.current_term,
+                            entries: vec![entry.clone()],
+                            leader_commit: 0,
+                        });
+                        let response = node.append_entries(request).await.unwrap();
+
+                        if response.get_ref().success {
+                            success += 1;
+                        }
+                    }
+
+                    if success > self.config.roster.len() / 2 {
+                        sender.send("Success".to_string()).unwrap();
+                    } else {
+                        sender.send("Failure".to_string()).unwrap();
+                    }
+                }
+                Ok(RaftEvent::GetEntry(key, sender )) => {
+                    println!("Got a get entry request: {:?}", key);
+                    if let Some(entry) = self.log.last() {
+                        sender.send(entry.clone()).unwrap();
+                    } else {
+                        sender.send("No entry".to_string()).unwrap();
+                    }
+                }
+                Err(_) => {
+                }
+            }
         }
-        State::Leader
     }
 
     async fn candidate_run(&mut self) -> State {
@@ -149,6 +211,14 @@ impl RaftNode {
                 };
                 sender.send(reply).unwrap();
                 println!("Becoming Follower again. Failed to become leader because a leader already exists. +++++++!!!!!!!!!+++++++");
+            }
+            Ok(RaftEvent::NewEntry(entry,sender)) => {
+                let reply = "I am not the leader".to_string();
+                sender.send(reply).unwrap();
+            }
+            Ok(RaftEvent::GetEntry(key, sender )) => {
+                println!("Got a get entry request: {:?}", key);
+                sender.send("Not the leader".to_string()).unwrap();
             }
             Err(_) => {
             }
@@ -191,10 +261,20 @@ impl RaftNode {
                 sender.send(reply).unwrap();
                 println!("Becoming Follower again. Failed to become leader because a leader already exists. +++++++!!!!!!!!!+++++++");
             }
+            Ok(RaftEvent::NewEntry(entry, sender)) => {
+                println!("Got a new entry: {:?}", entry);
+                let reply = "I am not the leader".to_string();
+                sender.send(reply).unwrap();
+            }
+            Ok(RaftEvent::GetEntry(key, sender )) => {
+                println!("Got a get entry request: {:?}", key);
+                sender.send("Not the leader".to_string()).unwrap();
+            }
             Err(_) => {
             }
         }
-        let mut votes = 0;
+
+        let mut votes = 1;
         while let Some(res) = set.join_next().await {
             if res.is_err() {
                 println!("Error: {:?}", res);
@@ -231,6 +311,15 @@ impl RaftNode {
                 };
                 sender.send(reply).unwrap();
                 println!("Becoming Follower again. Failed to become leader because a leader already exists. +++++++!!!!!!!!!+++++++");
+            }
+            Ok(RaftEvent::NewEntry(entry,sender)) => {
+                println!("Got a new entry: {:?}", entry);
+                let reply = "I am not the leader".to_string();
+                sender.send(reply).unwrap();
+            }
+            Ok(RaftEvent::GetEntry(key, sender )) => {
+                println!("Got a get entry request: {:?}", key);
+                sender.send("Not the leader".to_string()).unwrap();
             }
             Err(_) => {
             }
@@ -280,6 +369,15 @@ impl RaftNode {
                     sender.send(reply).unwrap();
                     let now = Instant::now();
                     last_heartbeat = now;
+                }
+                Ok(RaftEvent::NewEntry(entry,sender)) => {
+                    println!("Got a new entry: {:?}", entry);
+                    let reply = "I am not the leader".to_string();
+                    let _ = sender.send(reply).unwrap();
+                }
+                Ok(RaftEvent::GetEntry(key, sender )) => {
+                    println!("Got a get entry request: {:?}", key);
+                    sender.send("Not the leader".to_string()).unwrap();
                 }
                 Err(_) => {
                 }

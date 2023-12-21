@@ -5,10 +5,12 @@ use actix_web::{
     web::{self, Data},
     App, HttpResponse, HttpServer, Responder, Result,
 };
+use tokio::sync::mpsc::Sender;
 extern crate lazy_static;
 
 use std::convert::TryInto;
 use std::time;
+use raft::grpcserver::RaftEvent;
 mod file_reader;
 //use easy_reader::EasyReader;
 use clap::Parser;
@@ -36,8 +38,7 @@ struct Args {
     id: String,
 }
 
-//#[actix_web::main]
-#[tokio::main]
+#[actix_web::main]
 async fn main() -> Result<(), std::io::Error> {
     let args = Args::parse();
 
@@ -45,28 +46,32 @@ async fn main() -> Result<(), std::io::Error> {
 
     let raft_config = raft::config::RaftConfig::new(args.id.clone(), nodes.clone());
     let (sender, mut receiver) = tokio::sync::mpsc::channel(100);
-    let mut raft = raft::RaftNode::new(args.id, raft_config, receiver);
-    raft.run(sender).await.expect("could not start raft server");
+    let mut raft = raft::RaftNode::new(args.id.clone(), raft_config, receiver);
+    let tx = sender.clone();
+    tokio::spawn(async move {
+        let _ = raft.run(tx).await;
+    });
 
-    Ok(())
-
+    let sender_ark = Data::new(sender.clone());
     // TODO: start server
     /*
     let config = Config::new(args.dir , args.compaction);
     let db_mutex = create_db(config).expect("could not start db");
-
+    */
+    println!("starting web server");
     HttpServer::new(move || {
         App::new()
-            .app_data(db_mutex.clone())
+            .app_data(sender_ark.clone())
+            //.app_data(db_mutex.clone())
             .service(get_value_for_key)
             .service(put_value_for_key)
             .service(delete_value_for_key)
             .service(compact_data)
+            .service(get_index)
     })
-    .bind("127.0.0.1:8080")?
+    .bind(format!("0.0.0.0:8080"))?
     .run()
     .await
-    */
 }
 
 fn get_work_dir() -> PathBuf {
@@ -74,7 +79,11 @@ fn get_work_dir() -> PathBuf {
 }
 
 #[get("/v1/data/{key}")]
-async fn get_value_for_key(db: Data<NullDB>, request: web::Path<String>) -> impl Responder {
+async fn get_value_for_key(
+    //db: Data<NullDB>, 
+    sender: Data<Sender<RaftEvent>>,
+    request: web::Path<String>) -> impl Responder {
+    /*
     let key = request.into_inner();
 
     let then = time::Instant::now();
@@ -85,22 +94,38 @@ async fn get_value_for_key(db: Data<NullDB>, request: web::Path<String>) -> impl
         .try_into()
         .unwrap();
     println!("duration: {}", dur);
-    match ret {
+    */
+    let (tx, receiver) = tokio::sync::oneshot::channel();
+    let event = RaftEvent::GetEntry(request.into_inner(), tx);
+    let _ret = sender.send(event).await;
+    match receiver.await {
         Err(e) => {
             HttpResponse::InternalServerError().body(format!("Issue getting value for key: {}", e))
         }
         Ok(value) => HttpResponse::Ok().body(value),
     }
+    
+}
+
+#[get("/")]
+async fn get_index() -> impl Responder {
+    HttpResponse::Ok().body("Hello world!")
 }
 
 #[post("/v1/data/{key}")]
 pub async fn put_value_for_key(
-    db: Data<NullDB>,
-    key: web::Path<String>,
+    sender: Data<Sender<RaftEvent>>,
+    //db: Data<NullDB>,
+    _key: web::Path<String>,
     req_body: String,
 ) -> impl Responder {
     println!("putting data {}", req_body);
-    let ret = db.write_value_to_log(key.into_inner(), req_body);
+    let (tx, receiver) = tokio::sync::oneshot::channel();
+    let event = RaftEvent::NewEntry(req_body.clone(), tx);
+    let _ = sender.send(event).await;
+
+    let ret = receiver.await;
+//    let ret = db.write_value_to_log(key.into_inner(), req_body);
 
     match ret {
         Err(_) => HttpResponse::InternalServerError(),

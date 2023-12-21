@@ -13,6 +13,8 @@ pub struct RaftGRPCServer {
 pub enum RaftEvent {
     VoteRequest(VoteRequest, oneshot::Sender<VoteReply>),
     AppendEntriesRequest(AppendEntriesRequest, oneshot::Sender<AppendEntriesReply>),
+    NewEntry(String, oneshot::Sender<String>),
+    GetEntry(String, oneshot::Sender<String>),
 }
 
 #[tonic::async_trait]

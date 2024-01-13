@@ -8,14 +8,11 @@ use actix_web::{
 use tokio::sync::mpsc::Sender;
 extern crate lazy_static;
 
-use std::convert::TryInto;
-use std::time;
 use raft::grpcserver::RaftEvent;
 mod file_reader;
-//use easy_reader::EasyReader;
 use clap::Parser;
 use file_reader::EasyReader;
-use nulldb::{create_db, Config, NullDB};
+use nulldb::NullDB;
 mod errors;
 mod file_compactor;
 mod index;
@@ -45,8 +42,8 @@ async fn main() -> Result<(), std::io::Error> {
     let nodes = args.roster.split(",").collect::<Vec<&str>>();
 
     let raft_config = raft::config::RaftConfig::new(args.id.clone(), nodes.clone());
-    let (sender, mut receiver) = tokio::sync::mpsc::channel(100);
-    let mut raft = raft::RaftNode::new(args.id.clone(), raft_config, receiver);
+    let (sender, receiver) = tokio::sync::mpsc::channel(100);
+    let mut raft = raft::RaftNode::new(raft_config, receiver);
     let tx = sender.clone();
     tokio::spawn(async move {
         let _ = raft.run(tx).await;
@@ -80,9 +77,10 @@ fn get_work_dir() -> PathBuf {
 
 #[get("/v1/data/{key}")]
 async fn get_value_for_key(
-    //db: Data<NullDB>, 
+    //db: Data<NullDB>,
     sender: Data<Sender<RaftEvent>>,
-    request: web::Path<String>) -> impl Responder {
+    request: web::Path<String>,
+) -> impl Responder {
     /*
     let key = request.into_inner();
 
@@ -104,7 +102,6 @@ async fn get_value_for_key(
         }
         Ok(value) => HttpResponse::Ok().body(value),
     }
-    
 }
 
 #[get("/")]
@@ -116,16 +113,19 @@ async fn get_index() -> impl Responder {
 pub async fn put_value_for_key(
     sender: Data<Sender<RaftEvent>>,
     //db: Data<NullDB>,
-    _key: web::Path<String>,
+    key: web::Path<String>,
     req_body: String,
 ) -> impl Responder {
     println!("putting data {}", req_body);
     let (tx, receiver) = tokio::sync::oneshot::channel();
-    let event = RaftEvent::NewEntry(req_body.clone(), tx);
+    let event = RaftEvent::NewEntry {
+        key: key.clone(),
+        value: req_body.clone(),
+        sender: tx,
+    };
     let _ = sender.send(event).await;
 
     let ret = receiver.await;
-//    let ret = db.write_value_to_log(key.into_inner(), req_body);
 
     match ret {
         Err(_) => HttpResponse::InternalServerError(),

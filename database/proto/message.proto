@@ -14,7 +14,7 @@ service Raft {
 
 
 message VoteRequest {
-  int32 candidateId = 1;
+  string candidateId = 1;
   int32 term = 2;
   int32 lastLogIndex = 3;
   int32 lastLogTerm = 4;
@@ -27,11 +27,16 @@ message VoteReply {
 
 message AppendEntriesRequest {
   int32 term = 1;
-  int32 leaderId = 2;
+  string leaderId = 2;
   int32 prevLogIndex = 3;
   int32 prevLogTerm = 4;
-  repeated string entries = 5;
+  repeated LogEntry entries = 5;
   int32 leaderCommit = 6;
+}
+
+message LogEntry {
+  string key = 1;
+  string value = 2;
 }
 
 

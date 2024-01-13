@@ -89,8 +89,6 @@
 //! ```
 
 use fnv::FnvHashMap;
-#[cfg(feature = "rand")]
-use rand::Rng;
 use std::io::{self, prelude::*, Error, ErrorKind, SeekFrom};
 
 const CR_BYTE: u8 = b'\r';
@@ -101,8 +99,6 @@ enum ReadMode {
     Prev,
     Current,
     Next,
-    #[cfg(feature = "rand")]
-    Random,
 }
 
 pub struct EasyReader<R> {
@@ -187,11 +183,6 @@ impl<R: Read + Seek> EasyReader<R> {
         self.read_line(ReadMode::Next)
     }
 
-    #[cfg(feature = "rand")]
-    pub fn random_line(&mut self) -> io::Result<Option<String>> {
-        self.read_line(ReadMode::Random)
-    }
-
     fn read_line(&mut self, mode: ReadMode) -> io::Result<Option<String>> {
         match mode {
             ReadMode::Prev => {
@@ -237,18 +228,6 @@ impl<R: Read + Seek> EasyReader<R> {
                     return self.read_line(ReadMode::Current);
                 } else {
                     self.current_start_line_offset = self.current_end_line_offset;
-                }
-            }
-            #[cfg(feature = "rand")]
-            ReadMode::Random => {
-                if self.indexed {
-                    let rnd_idx = rand::thread_rng().gen_range(0..self.offsets_index.len() - 1);
-                    self.current_start_line_offset = self.offsets_index[rnd_idx].0 as u64;
-                    self.current_end_line_offset = self.offsets_index[rnd_idx].1 as u64;
-                    return self.read_line(ReadMode::Current);
-                } else {
-                    self.current_start_line_offset =
-                        rand::thread_rng().gen_range(0..self.file_size);
                 }
             }
         }
@@ -329,14 +308,6 @@ impl<R: Read + Seek> EasyReader<R> {
                             if n_chunks == 0
                                 && self.current_start_line_offset == new_start_line_offset
                             {
-                                #[cfg(feature = "rand")]
-                                {
-                                    if mode != ReadMode::Random {
-                                        // Not moved yet
-                                        new_start_line_offset -= 1;
-                                        continue;
-                                    }
-                                }
                                 #[cfg(not(feature = "rand"))]
                                 {
                                     // Not moved yet

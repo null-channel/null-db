@@ -1,48 +1,79 @@
+mod candidate;
+pub mod config;
+mod follower;
+pub mod grpcserver;
+mod leader;
+
+use raft::raft_server::RaftServer;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-use rand_chacha::ChaCha8Rng;
-use rand::prelude::*;
-use raft::raft_server::RaftServer;
-use tokio::{sync::mpsc::{self, Receiver, Sender}, task::JoinSet};
-use tonic::{transport::Server, Request, Response, Status};
-
-//use hello_world::HelloRequest;
-
+use tokio::sync::mpsc::{Receiver, Sender};
+use tonic::{transport::Server, Status};
 pub mod raft {
     tonic::include_proto!("raft");
 }
-pub mod config;
-pub mod grpcserver;
-use config::RaftConfig;
 
+use self::{
+    candidate::CandidateState, follower::FollowerState, grpcserver::RaftEvent, leader::LeaderState,
+};
 use crate::raft::grpcserver::RaftGRPCServer;
+use config::RaftConfig;
+const TIME_OUT: Duration = Duration::from_secs(1);
 
-use self::grpcserver::RaftEvent;
-
-const TIME_OUT: Duration = Duration::from_secs(5);
+type RaftClients =
+    HashMap<String, raft::raft_client::RaftClient<tonic::transport::channel::Channel>>;
 
 pub struct RaftNode {
     state: State,
-    raft_clients:
-        HashMap<String, raft::raft_client::RaftClient<tonic::transport::channel::Channel>>,
-    log: Vec<String>,
+    raft_clients: RaftClients,
+    log: RaftLog,
     config: RaftConfig,
-    current_term: i32,
-    log_index: i32,
     receiver: Receiver<RaftEvent>,
 }
 
-impl RaftNode {
-    pub fn new(node_id: String, config: RaftConfig, receiver: Receiver<RaftEvent>) -> Self {
-        Self {
-            state: State::Follower,
-            raft_clients: HashMap::new(),
-            log: Vec::new(),
-            config,
-            current_term: 0,
+pub struct RaftLog {
+    pub log_index: i32,
+    pub log: HashMap<String, String>,
+}
+
+impl RaftLog {
+    pub fn new() -> RaftLog {
+        RaftLog {
             log_index: 0,
+            log: HashMap::new(),
+        }
+    }
+
+    pub fn get(&self, key: &String) -> Option<&String> {
+        self.log.get(key)
+    }
+
+    pub fn len(&self) -> usize {
+        self.log.len()
+    }
+
+    pub fn push(&mut self, entry: (String, String)) {
+        self.log.insert(entry.0, entry.1);
+        self.log_index += 1;
+    }
+
+    pub fn push_entries(&mut self, entries: Vec<raft::LogEntry>) {
+        for entry in entries {
+            self.push((entry.key, entry.value));
+        }
+        self.log_index += 1;
+    }
+}
+
+impl RaftNode {
+    pub fn new(config: RaftConfig, receiver: Receiver<RaftEvent>) -> Self {
+        Self {
+            state: State::Follower(FollowerState::new(Instant::now(), 0)),
+            raft_clients: HashMap::new(),
+            log: RaftLog::new(),
+            config,
             receiver,
         }
     }
@@ -75,335 +106,68 @@ impl RaftNode {
         }
 
         loop {
-            let next_state = match &mut self.state {
-                State::Follower => {
-                    let then = Instant::now();
-                    self.follower_run(then).await
-                }
-                State::Candidate => self.candidate_run().await,
-                State::Leader => self.leader_run().await,
-            };
-
-            // Do whatever logic to change state.
-            self.change_state(next_state);
+            let state = self.run_tick().await;
+            self.next_state(state);
         }
     }
 
-    async fn leader_run(&mut self) -> State {
-        println!("Does Leader Stuff");
-
-        // Send heartbeats to all other nodes
-        // TODO: Send heartbeats to all other nodes
-        loop {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-
-            for nodes in self.raft_clients.values_mut() {
-                // TODO: need last log index and term
-                let mut node = nodes.clone();
-                let request = tonic::Request::new(raft::AppendEntriesRequest {
-                    term: self.current_term,
-                    leader_id: self.config.candidate_id.clone().parse().unwrap(),
-                    prev_log_index: self.log_index,
-                    prev_log_term: self.current_term,
-                    entries: Vec::new(),
-                    leader_commit: 0,
-                });
-                let _response = node.append_entries(request).await.unwrap();
-            }
-
-            match self.receiver.try_recv() {
-                Ok(RaftEvent::VoteRequest(request, sender)) => {
-                    println!("Got a vote request: {:?}", request);
-                    if request.term > self.current_term {
-                        self.current_term = request.term;
-                        let reply = raft::VoteReply {
-                            term: self.current_term,
-                            vote_granted: true,
-                        };
-                        sender.send(reply).unwrap();
-                        return State::Follower;
-                    }
-                }
-                Ok(RaftEvent::AppendEntriesRequest(request, sender)) => {
-                    println!("Got an append entries request: {:?}", request);
-                    let reply = raft::AppendEntriesReply {
-                        term: self.current_term,
-                        success: true,
-                    };
-                    sender.send(reply).unwrap();
-                    println!("Becoming Follower again. Failed to become leader because a leader already exists. +++++++!!!!!!!!!+++++++");
-                }
-                Ok(RaftEvent::NewEntry(entry,sender)) => {
-                    println!("Got a new entry: {:?}", entry);
-                    //log entry
-                    self.log.push(entry.clone());
-                    self.log_index += 1;
-
-                    let mut success = 1;
-                    // Send append entries to all other nodes
-                    for nodes in self.raft_clients.values_mut() {
-                        let mut node = nodes.clone();
-                        let request = tonic::Request::new(raft::AppendEntriesRequest {
-                            term: self.current_term,
-                            leader_id: self.config.candidate_id.clone().parse().unwrap(),
-                            prev_log_index: self.log_index,
-                            prev_log_term: self.current_term,
-                            entries: vec![entry.clone()],
-                            leader_commit: 0,
-                        });
-                        let response = node.append_entries(request).await.unwrap();
-
-                        if response.get_ref().success {
-                            success += 1;
-                        }
-                    }
-
-                    if success > self.config.roster.len() / 2 {
-                        sender.send("Success".to_string()).unwrap();
-                    } else {
-                        sender.send("Failure".to_string()).unwrap();
-                    }
-                }
-                Ok(RaftEvent::GetEntry(key, sender )) => {
-                    println!("Got a get entry request: {:?}", key);
-                    if let Some(entry) = self.log.last() {
-                        sender.send(entry.clone()).unwrap();
-                    } else {
-                        sender.send("No entry".to_string()).unwrap();
-                    }
-                }
-                Err(_) => {
-                }
-            }
+    async fn run_tick(&mut self) -> Option<State> {
+        let state = self
+            .state
+            .tick(&self.config, &self.log, &mut self.raft_clients)
+            .await;
+        if state.is_some() {
+            return state;
         }
-    }
 
-    async fn candidate_run(&mut self) -> State {
-        println!("Does Candidate Stuff");
-
-        // Send vote requests to all other nodes
-        let random_secs = {
-            let mut rng = ChaCha8Rng::seed_from_u64(self.config.candidate_id.parse().unwrap());
-            rng.gen_range(1..2500)
-        };
-
-        tokio::time::sleep(Duration::from_millis(random_secs)).await;
-
-        // Check for messages from other nodes
         match self.receiver.try_recv() {
-            Ok(RaftEvent::VoteRequest(request, sender)) => {
-                println!("Got a vote request: {:?}", request);
-                if request.term > self.current_term {
-                    self.current_term = request.term;
-                    let reply = raft::VoteReply {
-                        term: self.current_term,
-                        vote_granted: true,
-                    };
-                    sender.send(reply).unwrap();
-                    return State::Follower;
-                }
+            Ok(event) => {
+                self.state
+                    .on_message(event, &self.config, &mut self.raft_clients, &mut self.log)
+                    .await
             }
-            Ok(RaftEvent::AppendEntriesRequest(request, sender)) => {
-                println!("Got an append entries request: {:?}", request);
-                let reply = raft::AppendEntriesReply {
-                    term: self.current_term,
-                    success: true,
-                };
-                sender.send(reply).unwrap();
-                println!("Becoming Follower again. Failed to become leader because a leader already exists. +++++++!!!!!!!!!+++++++");
-            }
-            Ok(RaftEvent::NewEntry(entry,sender)) => {
-                let reply = "I am not the leader".to_string();
-                sender.send(reply).unwrap();
-            }
-            Ok(RaftEvent::GetEntry(key, sender )) => {
-                println!("Got a get entry request: {:?}", key);
-                sender.send("Not the leader".to_string()).unwrap();
-            }
-            Err(_) => {
-            }
-        }
-        // Wait for responses from all other nodes
-        self.current_term += 1;
-        let mut set = JoinSet::new();
-        for nodes in self.raft_clients.values_mut() {
-            // TODO: need last log index and term
-            let mut node = nodes.clone();
-            let request = tonic::Request::new(raft::VoteRequest {
-                candidate_id: self.config.candidate_id.clone().parse().unwrap(),
-                term: self.current_term,
-                last_log_index: self.log_index,
-                last_log_term: self.current_term,
-            });
-            set.spawn(async move {
-                let response = node.vote(request).await.unwrap();
-                println!("RESPONSE={:?}", response);
-                response
-            });
-        }
-
-        // Check for messages from other nodes
-        match self.receiver.try_recv() {
-            Ok(RaftEvent::VoteRequest(request, sender)) => {
-                println!("Got a vote request: {:?}", request);
-                let reply = raft::VoteReply {
-                    term: self.current_term,
-                    vote_granted: false,
-                };
-                sender.send(reply).unwrap()
-            }
-            Ok(RaftEvent::AppendEntriesRequest(request, sender)) => {
-                println!("Got an append entries request: {:?}", request);
-                let reply = raft::AppendEntriesReply {
-                    term: self.current_term,
-                    success: true,
-                };
-                sender.send(reply).unwrap();
-                println!("Becoming Follower again. Failed to become leader because a leader already exists. +++++++!!!!!!!!!+++++++");
-            }
-            Ok(RaftEvent::NewEntry(entry, sender)) => {
-                println!("Got a new entry: {:?}", entry);
-                let reply = "I am not the leader".to_string();
-                sender.send(reply).unwrap();
-            }
-            Ok(RaftEvent::GetEntry(key, sender )) => {
-                println!("Got a get entry request: {:?}", key);
-                sender.send("Not the leader".to_string()).unwrap();
-            }
-            Err(_) => {
-            }
-        }
-
-        let mut votes = 1;
-        while let Some(res) = set.join_next().await {
-            if res.is_err() {
-                println!("Error: {:?}", res);
-                continue;
-            }
-            if let Ok(response) = res {
-                if response.get_ref().vote_granted {
-                    votes += 1;
-                }
-            };
-        }
-
-        if votes > self.config.roster.len() / 2 {
-            print!("Becoming Leader");
-            return State::Leader;
-        }
-
-        // Check for messages from other nodes
-        match self.receiver.try_recv() {
-            Ok(RaftEvent::VoteRequest(request, sender)) => {
-                println!("vote request: {:?}", request);
-                println!("voting no");
-                let reply = raft::VoteReply {
-                    term: self.current_term,
-                    vote_granted: false,
-                };
-                sender.send(reply).unwrap()
-            }
-            Ok(RaftEvent::AppendEntriesRequest(request, sender)) => {
-                println!("Got an append entries request: {:?}", request);
-                let reply = raft::AppendEntriesReply {
-                    term: self.current_term,
-                    success: true,
-                };
-                sender.send(reply).unwrap();
-                println!("Becoming Follower again. Failed to become leader because a leader already exists. +++++++!!!!!!!!!+++++++");
-            }
-            Ok(RaftEvent::NewEntry(entry,sender)) => {
-                println!("Got a new entry: {:?}", entry);
-                let reply = "I am not the leader".to_string();
-                sender.send(reply).unwrap();
-            }
-            Ok(RaftEvent::GetEntry(key, sender )) => {
-                println!("Got a get entry request: {:?}", key);
-                sender.send("Not the leader".to_string()).unwrap();
-            }
-            Err(_) => {
-            }
-        }
-        println!("Lost vote, Becoming Follower again.");
-        State::Follower
-    }
-
-    async fn follower_run(&mut self, then: Instant) -> State {
-        println!("Does Follower Stuff");
-
-        let mut last_heartbeat = then;
-        loop {
-            let now = Instant::now();
-            if now.duration_since(last_heartbeat) > TIME_OUT {
-                println!("Timeout");
-                return State::Candidate;
-            }
-
-            // Check for messages from other nodes
-            match self.receiver.try_recv() {
-                Ok(RaftEvent::VoteRequest(request, sender)) => {
-                    println!("Got a vote request: {:?}", request);
-                    if request.term > self.current_term {
-                        println!("voting yes");
-                        self.current_term = request.term;
-                        let reply = raft::VoteReply {
-                            term: self.current_term,
-                            vote_granted: true,
-                        };
-                        sender.send(reply).unwrap();
-                        continue;
-                    }
-                    println!("voting no");
-                    let reply = raft::VoteReply {
-                        term: self.current_term,
-                        vote_granted: false,
-                    };
-                    sender.send(reply).unwrap()
-                }
-                Ok(RaftEvent::AppendEntriesRequest(request, sender)) => {
-                    println!("Got an append entries request!");
-                    let reply = raft::AppendEntriesReply {
-                        term: self.current_term,
-                        success: true,
-                    };
-                    sender.send(reply).unwrap();
-                    let now = Instant::now();
-                    last_heartbeat = now;
-                }
-                Ok(RaftEvent::NewEntry(entry,sender)) => {
-                    println!("Got a new entry: {:?}", entry);
-                    let reply = "I am not the leader".to_string();
-                    let _ = sender.send(reply).unwrap();
-                }
-                Ok(RaftEvent::GetEntry(key, sender )) => {
-                    println!("Got a get entry request: {:?}", key);
-                    sender.send("Not the leader".to_string()).unwrap();
-                }
-                Err(_) => {
-                }
-            }
-
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            Err(_) => None,
         }
     }
 
-    fn change_state(&mut self, state: State) {
-        self.state = state;
+    fn next_state(&mut self, state: Option<State>) {
+        if let Some(state) = state {
+            self.state = state;
+        }
     }
 }
 
 pub enum State {
-    Follower,
-    Candidate,
-    Leader,
+    Follower(FollowerState),
+    Candidate(CandidateState),
+    Leader(LeaderState),
 }
 
 impl State {
-    pub fn to_string(&self) -> String {
+    pub async fn on_message(
+        &mut self,
+        message: RaftEvent,
+        config: &RaftConfig,
+        clients: &mut RaftClients,
+        log: &mut RaftLog,
+    ) -> Option<State> {
         match self {
-            State::Follower => "Follower".to_string(),
-            State::Candidate => "Candidate".to_string(),
-            State::Leader => "Leader".to_string(),
+            State::Follower(follower) => follower.on_message(message, log),
+            State::Candidate(candidate) => candidate.on_message(message),
+            State::Leader(leader) => leader.on_message(message, config, clients, log).await,
+        }
+    }
+
+    pub async fn tick(
+        &mut self,
+        config: &RaftConfig,
+        log: &RaftLog,
+        clients: &mut RaftClients,
+    ) -> Option<State> {
+        match self {
+            State::Follower(follower) => follower.tick(),
+            State::Candidate(candidate) => candidate.tick(config, log, clients).await,
+            State::Leader(leader) => leader.tick(config, clients).await,
         }
     }
 }
@@ -412,7 +176,9 @@ pub async fn start_raft_server(
     port: String,
     sender: Sender<RaftEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let raft_server = RaftGRPCServer { event_sender: sender };
+    let raft_server = RaftGRPCServer {
+        event_sender: sender,
+    };
     let addr = format!("0.0.0.0:{}", port).parse().unwrap();
     let server = RaftServer::new(raft_server);
     Server::builder().add_service(server).serve(addr).await?;

@@ -42,8 +42,10 @@ async fn main() -> Result<(), std::io::Error> {
 
     let nodes = args.roster.split(",").collect::<Vec<&str>>();
 
-    let raft_config = raft::config::RaftConfig::new(args.id.clone(), nodes.clone());
     let (sender, receiver) = tokio::sync::mpsc::channel(100);
+    let config = Config::new(args.dir , args.compaction);
+    let raft_config = raft::config::RaftConfig::new(args.id.clone(), nodes.clone());
+    let db_mutex = create_db(config).expect("could not start db");
     let mut raft = raft::RaftNode::new(raft_config, receiver);
     let tx = sender.clone();
     tokio::spawn(async move {
@@ -51,8 +53,6 @@ async fn main() -> Result<(), std::io::Error> {
     });
 
     let sender_ark = Data::new(sender.clone());
-    let config = Config::new(args.dir , args.compaction);
-    let db_mutex = create_db(config).expect("could not start db");
     println!("starting web server");
     HttpServer::new(move || {
         App::new()

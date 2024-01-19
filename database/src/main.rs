@@ -6,13 +6,14 @@ use actix_web::{
     App, HttpResponse, HttpServer, Responder, Result,
 };
 use tokio::sync::mpsc::Sender;
+use crate::nulldb::create_db;
 extern crate lazy_static;
 
 use raft::grpcserver::RaftEvent;
 mod file_reader;
 use clap::Parser;
 use file_reader::EasyReader;
-use nulldb::NullDB;
+use nulldb::{NullDB, Config};
 mod errors;
 mod file_compactor;
 mod index;
@@ -50,11 +51,8 @@ async fn main() -> Result<(), std::io::Error> {
     });
 
     let sender_ark = Data::new(sender.clone());
-    // TODO: start server
-    /*
     let config = Config::new(args.dir , args.compaction);
     let db_mutex = create_db(config).expect("could not start db");
-    */
     println!("starting web server");
     HttpServer::new(move || {
         App::new()

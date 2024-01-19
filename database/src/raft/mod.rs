@@ -90,7 +90,7 @@ impl RaftNode {
 
         // Wait for the gRPC server to start
         // TODO: fix so there are retries if failed to connect
-        tokio::time::sleep(Duration::from_millis(3000)).await;
+        tokio::time::sleep(Duration::from_millis(2000)).await;
 
         // Connect to all other nodes
         for node in self.config.roster.clone() {

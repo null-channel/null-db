@@ -1,0 +1,32 @@
+{
+	"raft": {
+		"index": 1,
+	},
+	"key": "key",
+	"value": "~tombstone~"
+	"tombstone": false
+}
+
+{
+	"version": 2,
+}
+{
+	"metadata": {
+		"bytes": 123
+		"something": "else",
+	},
+}
+{
+	"raft": {
+		"index": 1,
+	},
+	"metadata": {
+		"version": 3
+		"tombstone": false
+	},
+}
+{
+	"key2": "key",
+	"something": "else",
+	"value": "~tombstone~"
+}

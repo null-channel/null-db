@@ -21,6 +21,7 @@ mod nulldb;
 mod raft;
 mod record;
 mod utils;
+mod file;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

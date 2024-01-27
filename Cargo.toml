@@ -3,5 +3,5 @@
 members = [
     "cli",
     "database",
-    "experiments/iocost",
+    "experiments/iocost", "html-test",
 ]

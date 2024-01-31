@@ -1,3 +1,5 @@
+use crate::file::FileEngine;
+use crate::file::RecordTrait;
 use crate::index;
 use crate::index::*;
 use crate::EasyReader;
@@ -21,10 +23,12 @@ pub const LOG_SEGMENT_EXT: &'static str = "nullsegment";
 pub struct NullDB {
     main_log_mutex: RwLock<PathBuf>,
     main_log_file_mutex: RwLock<bool>,
-    main_log_memory_mutex: RwLock<HashMap<String, String>>,
+    main_log_memory_mutex: RwLock<HashMap<String, Box<dyn RecordTrait>>>,
     // Segment, Index
     log_indexes: RwLock<HashMap<PathBuf, Index>>,
     pub config: RwLock<Config>,
+    file_engine: FileEngine,
+    current_raft_index: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -86,6 +90,8 @@ impl NullDB {
             main_log_memory_mutex: RwLock::new(HashMap::new()),
             log_indexes: indexes,
             config: RwLock::new(config),
+            file_engine: FileEngine::Json,
+            current_raft_index: 0,
         })
     }
 
@@ -112,9 +118,63 @@ impl NullDB {
 
     // Deletes a record from the log
     pub fn delete_record(&self, key: String) -> anyhow::Result<()> {
-        self.write_value_to_log(key, TOMBSTONE.into())
+        let index = self.current_raft_index;
+        self.write_value_to_log(self.file_engine.new_tombstone_record(key, index))
     }
 
+    pub fn get_latest_record_from_disk(
+        &self
+    ) -> Result<Box<dyn RecordTrait>, errors::NullDbReadError> {
+
+        let Ok(config) = self.config.read() else {
+            println!("could not get readlock on config!");
+            panic!("we have poisiod our locks");
+        };
+        // If not in main log, check all the segments
+        let mut generation_mapper = utils::get_generations_segment_mapper(
+            config.path.as_path(),
+            file_compactor::SEGMENT_FILE_EXT.to_owned(),
+        )?;
+
+        /*
+         * unstable is faster, but could reorder "same" values.
+         * We will not have same values as this was from a set.
+         */
+        let mut gen_vec: Vec<i32> = generation_mapper.generations.into_iter().collect();
+        gen_vec.sort_unstable();
+
+        //Umm... I don't know if this is the best way to do this. it's what I did though, help me?
+        let mut gen_iter = gen_vec.into_iter();
+        let Ok(main_log_filename) = self.main_log_mutex.read() else {
+            panic!("we have poisiod our locks... don't do this please");
+        };
+
+        while let Some(current_gen) = gen_iter.next() {
+            println!("Gen {} in progress!", current_gen);
+            /*
+             * Power of rust, we KNOW that this is safe because we just built it...
+             * but it's better to check anyhow... sometimes annoying but.
+             */
+            if let Some(file_name_vec) = generation_mapper
+                .gen_name_segment_files
+                .get_mut(&current_gen)
+            {
+                file_name_vec.sort_unstable();
+                let mut file_name_iter = file_name_vec.into_iter();
+
+                let then = time::Instant::now();
+
+                while let Some(file_path) = file_name_iter.next_back() {
+                    //file names: [gen]-[time].nullsegment
+                    let path =
+                        self.get_path_for_file(format!("{}-{}", current_gen, file_path.clone()));
+
+                    return get_value_from_segment(path, 0, self.file_engine)
+                }
+            }
+        }
+        Err(errors::NullDbReadError::ValueNotFound)
+    }
     pub fn get_value_for_key(
         &self,
         key: String,
@@ -127,7 +187,7 @@ impl NullDB {
 
         // Check the main log first for key
         if let Some(value) = main_log.get(&key) {
-            println!("Returned value from main log! {}", value);
+            println!("Returned value from main log! {}, {}", value.id(), value.value().unwrap());
             return Ok(value.clone());
         }
 
@@ -213,7 +273,7 @@ impl NullDB {
     }
 
     // Writes value to log, will create new log if over 64 lines.
-    pub fn write_value_to_log(&self, key: String, value: String) -> anyhow::Result<()> {
+    pub fn write_value_to_log(&self, record: Box<dyn RecordTrait>) -> anyhow::Result<()> {
         let line_count;
         {
             let main_log = self.main_log_mutex.read();
@@ -268,21 +328,22 @@ impl NullDB {
         };
 
         // Write to memory
-        let old_value = main_log_memory.insert(key.clone(), value.clone());
+        let old_value = main_log_memory.insert(record.id(), record);
 
         let mut file = OpenOptions::new()
             .write(true)
             .append(true)
             .open(main_log_name.clone())?;
 
-        let ret = writeln!(file, "{}:{}", key, value);
+        let rec = record.serialize();
+        let ret = writeln!(file, "{}", rec);
 
         if ret.is_err() {
             // If we failed to write to disk, reset the memory to what it was before
             if let Some(old_value) = old_value {
-                main_log_memory.insert(key.clone(), old_value);
+                main_log_memory.insert(record.id().clone(), old_value);
             } else {
-                main_log_memory.remove(&key);
+                main_log_memory.remove(&record.id());
             }
             return Err(anyhow!("Could not write to main log file!"));
         }
@@ -309,7 +370,8 @@ impl NullDB {
 fn get_value_from_segment(
     path: PathBuf,
     line_number: usize,
-) -> anyhow::Result<String, errors::NullDbReadError> {
+    file_engine: FileEngine,
+) -> anyhow::Result<Box<dyn RecordTrait>, errors::NullDbReadError> {
     let file = OpenOptions::new()
         .read(true)
         .write(false)
@@ -325,23 +387,14 @@ fn get_value_from_segment(
         panic!("data corrupted");
     };
 
-    let parsed_value = get_value_from_database(value)?;
-
-    return Ok(parsed_value);
+    get_value_from_database(value, file_engine)
 }
 
-pub fn get_value_from_database(value: String) -> anyhow::Result<String, errors::NullDbReadError> {
-    let split = value.split(":").collect::<Vec<&str>>();
-    if split.len() != 2 {
-        return Err(errors::NullDbReadError::Corrupted);
-    }
-
-    let val = split[1].to_string().clone();
-    if val == TOMBSTONE {
-        return Err(errors::NullDbReadError::ValueDeleted);
-    }
-
-    Ok(value)
+pub fn get_value_from_database(value: String, file_engine: FileEngine) -> anyhow::Result<Box<dyn RecordTrait>, errors::NullDbReadError> {
+    file_engine.get_record_from_str(&value).map_err(|e| {
+        println!("Could not parse value from database! error: {}", e);
+        errors::NullDbReadError::Corrupted
+    })
 }
 
 pub fn get_key_from_database_line(

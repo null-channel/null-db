@@ -1,8 +1,10 @@
 use std::time::Instant;
 
-use crate::raft::{candidate::CandidateState, raft};
+use actix_web::web::Data;
 
-use super::{grpcserver::RaftEvent, State, TIME_OUT, RaftLog};
+use crate::{raft::{candidate::CandidateState, raft}, nulldb::NullDB};
+
+use super::{grpcserver::RaftEvent, RaftLog, State, TIME_OUT};
 
 pub struct FollowerState {
     pub last_heartbeat: Instant,
@@ -27,7 +29,7 @@ impl FollowerState {
         None
     }
 
-    pub fn on_message(&mut self, message: RaftEvent, log: &mut RaftLog) -> Option<State> {
+    pub fn on_message(&mut self, message: RaftEvent, log: Data<NullDB>) -> Option<State> {
         match message {
             RaftEvent::VoteRequest(request, sender) => {
                 println!("Got a vote request: {:?}", request);
@@ -62,7 +64,11 @@ impl FollowerState {
                 sender.send(reply).unwrap();
                 self.last_heartbeat = Instant::now();
             }
-            RaftEvent::NewEntry { key: _, value, sender } => {
+            RaftEvent::NewEntry {
+                key: _,
+                value,
+                sender,
+            } => {
                 println!("Got a new entry: {:?}", value);
                 //TODO: Proxy the request to the leader
                 let reply = "I am not the leader".to_string();

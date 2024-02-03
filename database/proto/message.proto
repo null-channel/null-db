@@ -12,7 +12,6 @@ service Raft {
   rpc AppendEntries (AppendEntriesRequest) returns (AppendEntriesReply) {}
 }
 
-
 message VoteRequest {
   string candidateId = 1;
   int32 term = 2;
@@ -39,8 +38,15 @@ message LogEntry {
   string value = 2;
 }
 
-
 message AppendEntriesReply {
   int32 term = 1;
   bool success = 2;
 }
+
+message ProtoRecord {
+  string key = 1;
+  optional string value = 2;
+  uint64 index = 3;
+  optional bool tombstone = 4;
+}
+

@@ -4,6 +4,7 @@ mod follower;
 pub mod grpcserver;
 mod leader;
 
+use actix_web::web::Data;
 use raft::raft_server::RaftServer;
 use std::{
     collections::HashMap,
@@ -18,7 +19,7 @@ pub mod raft {
 use self::{
     candidate::CandidateState, follower::FollowerState, grpcserver::RaftEvent, leader::LeaderState,
 };
-use crate::raft::grpcserver::RaftGRPCServer;
+use crate::{raft::grpcserver::RaftGRPCServer, nulldb::NullDB};
 use config::RaftConfig;
 const TIME_OUT: Duration = Duration::from_secs(1);
 
@@ -28,51 +29,18 @@ type RaftClients =
 pub struct RaftNode {
     state: State,
     raft_clients: RaftClients,
-    log: RaftLog,
+    log: Data<NullDB>,
     config: RaftConfig,
     receiver: Receiver<RaftEvent>,
 }
 
-pub struct RaftLog {
-    pub log_index: i32,
-    pub log: HashMap<String, String>,
-}
-
-impl RaftLog {
-    pub fn new() -> RaftLog {
-        RaftLog {
-            log_index: 0,
-            log: HashMap::new(),
-        }
-    }
-
-    pub fn get(&self, key: &String) -> Option<&String> {
-        self.log.get(key)
-    }
-
-    pub fn len(&self) -> usize {
-        self.log.len()
-    }
-
-    pub fn push(&mut self, entry: (String, String)) {
-        self.log.insert(entry.0, entry.1);
-        self.log_index += 1;
-    }
-
-    pub fn push_entries(&mut self, entries: Vec<raft::LogEntry>) {
-        for entry in entries {
-            self.push((entry.key, entry.value));
-        }
-        self.log_index += 1;
-    }
-}
 
 impl RaftNode {
-    pub fn new(config: RaftConfig, receiver: Receiver<RaftEvent>) -> Self {
+    pub fn new(config: RaftConfig, receiver: Receiver<RaftEvent>, log: Data<NullDB> ) -> Self {
         Self {
             state: State::Follower(FollowerState::new(Instant::now(), 0)),
             raft_clients: HashMap::new(),
-            log: RaftLog::new(),
+            log,
             config,
             receiver,
         }
@@ -114,7 +82,7 @@ impl RaftNode {
     async fn run_tick(&mut self) -> Option<State> {
         let state = self
             .state
-            .tick(&self.config, &self.log, &mut self.raft_clients)
+            .tick(&self.config, self.log, &mut self.raft_clients)
             .await;
         if state.is_some() {
             return state;
@@ -123,7 +91,7 @@ impl RaftNode {
         match self.receiver.try_recv() {
             Ok(event) => {
                 self.state
-                    .on_message(event, &self.config, &mut self.raft_clients, &mut self.log)
+                    .on_message(event, &self.config, &mut self.raft_clients, self.log)
                     .await
             }
             Err(_) => None,
@@ -149,7 +117,7 @@ impl State {
         message: RaftEvent,
         config: &RaftConfig,
         clients: &mut RaftClients,
-        log: &mut RaftLog,
+        log: Data<NullDB>,
     ) -> Option<State> {
         match self {
             State::Follower(follower) => follower.on_message(message, log),
@@ -161,7 +129,7 @@ impl State {
     pub async fn tick(
         &mut self,
         config: &RaftConfig,
-        log: &RaftLog,
+        log: Data<NullDB>,
         clients: &mut RaftClients,
     ) -> Option<State> {
         match self {

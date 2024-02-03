@@ -1,10 +1,15 @@
-use serde::{Deserialize, Serialize};
 use quick_xml::de::from_str;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+pub mod proto {
+    tonic::include_proto!("raft");
+}
+use prost::Message;
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct HtmlRecord {
     #[serde(rename = "@id")]
-    id: String,
+    key: String,
     #[serde(rename = "@index")]
     index: u64,
     #[serde(rename = "@class")]
@@ -13,69 +18,80 @@ pub struct HtmlRecord {
     value: Option<String>,
 }
 
-impl RecordTrait for HtmlRecord {
-    fn id(&self) -> String {
-        self.id.clone()
-    }
-
-    fn index(&self) -> u64 {
-        self.index
-    }
-
-    fn tombstone(&self) -> Option<bool> {
-        self.class.as_ref().map(|x| x == "tombstone")
-    }
-
-    fn value(&self) -> Option<String> {
-        self.value.clone()
-    }
-
-    fn serialize(&self) -> String {
-        quick_xml::se::to_string(&self).unwrap()
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct JsonRecord {
-    id: String,
+    key: String,
     index: u64,
     tombstone: Option<bool>,
     value: Option<String>,
 }
 
-impl RecordTrait for JsonRecord {
-    fn id(&self) -> String {
-        self.id.clone()
-    }
-
-    fn index(&self) -> u64 {
-        self.index
-    }
-
-    fn tombstone(&self) -> Option<bool> {
-        self.tombstone
-    }
-
-    fn value(&self) -> Option<String> {
-        self.value.clone()
-    }
-
-    fn serialize(&self) -> String {
-        serde_json::to_string(&self).unwrap()
-    }
+#[derive(Debug, Clone)]
+pub enum Record {
+    Json(JsonRecord),
+    Html(HtmlRecord),
+    Proto(proto::ProtoRecord),
 }
 
-pub trait RecordTrait {
-    fn id(&self) -> String;
-    fn index(&self) -> u64;
-    fn tombstone(&self) -> Option<bool>;
-    fn value(&self) -> Option<String>;
-    fn serialize(&self) -> String;
+impl Record {
+    pub fn serialize(&self) -> String {
+        match self {
+            Record::Json(json) => serde_json::to_string(json).unwrap(),
+            Record::Html(html) => quick_xml::se::to_string(html).unwrap(),
+            Record::Proto(proto) => {
+                let mut buf = Vec::new();
+                proto.encode(&mut buf).unwrap();
+                String::from_utf8(buf).unwrap()
+            }
+        }
+    }
+
+    pub fn get_id(&self) -> String {
+        match self {
+            Record::Json(json) => json.key.clone(),
+            Record::Html(html) => html.key.clone(),
+            Record::Proto(proto) => proto.key.clone(),
+        }
+    }
+
+    pub fn get_index(&self) -> u64 {
+        match self {
+            Record::Json(json) => json.index,
+            Record::Html(html) => html.index,
+            Record::Proto(proto) => proto.index,
+        }
+    }
+
+    pub fn get_tombstone(&self) -> Option<bool> {
+        match self {
+            Record::Json(json) => json.tombstone,
+            Record::Proto(proto) => proto.tombstone,
+            Record::Html(html) => match &html.class {
+                Some(class) => {
+                    if class == "tombstone" {
+                        Some(true)
+                    } else {
+                        None
+                    }
+                }
+                None => None,
+            },
+        }
+    }
+
+    pub fn get_value(&self) -> Option<String> {
+        match self {
+            Record::Json(json) => json.value.clone(),
+            Record::Html(html) => html.value.clone(),
+            Record::Proto(proto) => proto.value.clone(),
+        }
+    }
 }
 
 pub enum FileEngine {
     Json,
     Html,
+    Proto,
 }
 
 impl FileEngine {
@@ -83,66 +99,81 @@ impl FileEngine {
         match engine {
             "json" => FileEngine::Json,
             "html" => FileEngine::Html,
+            "proto" => FileEngine::Proto,
             _ => panic!("Invalid file engine"),
         }
     }
 
-    pub fn get_record_from_str(&self, value: &str) -> anyhow::Result<Box<dyn RecordTrait>> {
+    pub fn get_record_from_str(&self, value: &str) -> anyhow::Result<Box<Record>> {
         match self {
             FileEngine::Json => {
-                let json : JsonRecord = serde_json::from_str(value)?;
-                Ok(Box::new(json))
+                let json: JsonRecord = serde_json::from_str(value)?;
+                Ok(Box::new(Record::Json(json)))
             }
             FileEngine::Html => {
-                let html : HtmlRecord = from_str(value)?;
-                Ok(Box::new(html))
+                let html: HtmlRecord = from_str(value)?;
+                Ok(Box::new(Record::Html(html)))
+            }
+            FileEngine::Proto => {
+                let proto: proto::ProtoRecord = proto::ProtoRecord::decode(value.as_bytes())?;
+                Ok(Box::new(Record::Proto(proto)))
             }
         }
     }
 
-    pub fn record_to_string(&self, record: &dyn RecordTrait) -> String {
+    pub fn serialize(&self, record: Record) -> String {
         record.serialize()
     }
 
-    pub fn new_record(&self, id: String, index: u64, tombstone: Option<bool>, value: Option<String>) -> Box<dyn RecordTrait> {
+    pub fn new_record(
+        &self,
+        key: String,
+        index: u64,
+        tombstone: Option<bool>,
+        value: Option<String>,
+    ) -> Record {
         match self {
-            FileEngine::Json => {
-                Box::new(JsonRecord {
-                    id,
-                    index,
-                    tombstone,
-                    value,
-                })
-            }
-            FileEngine::Html => {
-                Box::new(HtmlRecord {
-                    id,
-                    index,
-                    class: tombstone.map(|x| if x { "tombstone".to_string() } else { "".to_string() }),
-                    value,
-                })
-            }
+            FileEngine::Json => Record::Json(JsonRecord {
+                key,
+                index,
+                tombstone,
+                value,
+            }),
+            FileEngine::Html => Record::Html(HtmlRecord {
+                key,
+                index,
+                class: None,
+                value,
+            }),
+            FileEngine::Proto => Record::Proto(proto::ProtoRecord {
+                key,
+                index,
+                tombstone,
+                value,
+            }),
         }
     }
 
-    pub fn new_tombstone_record(&self, id: String, index: u64) -> Box<dyn RecordTrait> {
+    pub fn new_tombstone_record(&self, key: String, index: u64) -> Record {
         match self {
-            FileEngine::Json => {
-                Box::new(JsonRecord {
-                    id,
-                    index,
-                    tombstone: Some(true),
-                    value: None,
-                })
-            }
-            FileEngine::Html => {
-                Box::new(HtmlRecord {
-                    id,
-                    index,
-                    class: Some("tombstone".to_string()),
-                    value: None,
-                })
-            }
+            FileEngine::Json => Record::Json(JsonRecord {
+                key,
+                index,
+                tombstone: Some(true),
+                value: None,
+            }),
+            FileEngine::Html => Record::Html(HtmlRecord {
+                key,
+                index,
+                class: Some("tombstone".to_string()),
+                value: None,
+            }),
+            FileEngine::Proto => Record::Proto(proto::ProtoRecord {
+                key,
+                index,
+                tombstone: Some(true),
+                value: None,
+            }),
         }
     }
 }

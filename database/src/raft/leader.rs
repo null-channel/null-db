@@ -1,8 +1,10 @@
 use std::time::{Duration, Instant};
 
-use crate::raft::raft;
+use actix_web::web::Data;
 
-use super::{config::RaftConfig, grpcserver::RaftEvent, RaftClients, RaftLog, State};
+use crate::{raft::raft, nulldb::NullDB, file::Record};
+
+use super::{config::RaftConfig, grpcserver::RaftEvent, RaftClients, State};
 
 pub struct LeaderState {
     pub term: i32,
@@ -50,7 +52,7 @@ impl LeaderState {
         message: RaftEvent,
         config: &RaftConfig,
         clients: &mut RaftClients,
-        log: &mut RaftLog,
+        log: Data<NullDB>,
     ) -> Option<State> {
         match message {
             RaftEvent::VoteRequest(request, sender) => {
@@ -85,7 +87,8 @@ impl LeaderState {
             RaftEvent::NewEntry { key, value, sender } => {
                 println!("Got a new entry: {}:{}", key, value);
                 //log entry
-                log.push((key.clone(), value.clone()));
+
+                log.push((key.clone(), value.clone(), self.log_index));
                 log.log_index += 1;
 
                 let mut success = 1;
@@ -97,7 +100,10 @@ impl LeaderState {
                         leader_id: config.candidate_id.clone(),
                         prev_log_index: self.log_index,
                         prev_log_term: self.term,
-                        entries: vec![raft::LogEntry {key: key.clone(),value: value.clone()}],
+                        entries: vec![raft::LogEntry {
+                            key: key.clone(),
+                            value: value.clone(),
+                        }],
                         leader_commit: 0,
                     });
                     let response = node.append_entries(request).await.unwrap();

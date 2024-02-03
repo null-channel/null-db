@@ -24,7 +24,8 @@ impl super::raft::raft_server::Raft for RaftGRPCServer {
     async fn vote(&self, request: Request<VoteRequest>) -> Result<Response<VoteReply>, Status> {
         println!("Got a request: {:?}", request);
         let (sender, receiver) = oneshot::channel();
-        let _ = self.event_sender
+        let _ = self
+            .event_sender
             .send(RaftEvent::VoteRequest(request.into_inner(), sender))
             .await
             .map_err(|_| Status::internal("Failed to send vote request"));
@@ -41,7 +42,8 @@ impl super::raft::raft_server::Raft for RaftGRPCServer {
     ) -> Result<Response<AppendEntriesReply>, Status> {
         println!("Got a request: {:?}", request);
         let (sender, receiver) = oneshot::channel();
-        let _ = self.event_sender
+        let _ = self
+            .event_sender
             .send(RaftEvent::AppendEntriesRequest(
                 request.into_inner(),
                 sender,

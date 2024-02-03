@@ -1,27 +1,27 @@
 use std::path::PathBuf;
 
+use crate::nulldb::create_db;
 use actix_web::{
     delete, get, post,
     web::{self, Data},
     App, HttpResponse, HttpServer, Responder, Result,
 };
 use tokio::sync::mpsc::Sender;
-use crate::nulldb::create_db;
 extern crate lazy_static;
 
 use raft::grpcserver::RaftEvent;
 mod file_reader;
 use clap::Parser;
 use file_reader::EasyReader;
-use nulldb::{NullDB, Config};
+use nulldb::{Config, NullDB};
 mod errors;
+mod file;
 mod file_compactor;
 mod index;
 mod nulldb;
 mod raft;
 mod record;
 mod utils;
-mod file;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -35,6 +35,9 @@ struct Args {
     roster: String,
     #[clap(short, long)]
     id: String,
+    #[clap(short, long)]
+    #[arg(default_value = "html")]
+    encoding: String,
 }
 
 #[actix_web::main]
@@ -44,7 +47,7 @@ async fn main() -> Result<(), std::io::Error> {
     let nodes = args.roster.split(",").collect::<Vec<&str>>();
 
     let (sender, receiver) = tokio::sync::mpsc::channel(100);
-    let config = Config::new(args.dir , args.compaction);
+    let config = Config::new(args.dir, args.compaction, args.encoding.clone());
     let raft_config = raft::config::RaftConfig::new(args.id.clone(), nodes.clone());
     let db_mutex = create_db(config).expect("could not start db");
     let mut raft = raft::RaftNode::new(raft_config, receiver);

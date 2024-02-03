@@ -1,8 +1,8 @@
-use crate::file::FileEngine;
-use crate::file::RecordTrait;
+use crate::file::{FileEngine, Record};
 use crate::index;
 use crate::index::*;
 use crate::EasyReader;
+use crate::raft::raft::LogEntry;
 use crate::{errors, file_compactor, utils};
 use actix_web::web::Data;
 use anyhow::anyhow;
@@ -12,6 +12,7 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
 use std::sync::mpsc;
 use std::sync::RwLock;
 use std::time;
@@ -23,23 +24,28 @@ pub const LOG_SEGMENT_EXT: &'static str = "nullsegment";
 pub struct NullDB {
     main_log_mutex: RwLock<PathBuf>,
     main_log_file_mutex: RwLock<bool>,
-    main_log_memory_mutex: RwLock<HashMap<String, Box<dyn RecordTrait>>>,
+    main_log_memory_mutex: RwLock<HashMap<String, Record>>,
     // Segment, Index
     log_indexes: RwLock<HashMap<PathBuf, Index>>,
     pub config: RwLock<Config>,
-    file_engine: FileEngine,
-    current_raft_index: u64,
+    file_engine: RwLock<FileEngine>,
+    current_raft_index: AtomicU64,
 }
 
 #[derive(Clone, Debug)]
 pub struct Config {
     path: PathBuf,
     compaction: bool,
+    encoding: String,
 }
 
 impl Config {
-    pub fn new(path: PathBuf, compaction: bool) -> Config {
-        Config { path, compaction }
+    pub fn new(path: PathBuf, compaction: bool, encoding: String) -> Config {
+        Config {
+            path,
+            compaction,
+            encoding,
+        }
     }
 }
 
@@ -84,14 +90,15 @@ impl NullDB {
             }
         };
         let indexes = RwLock::new(generate_indexes(config.path.as_path(), &main_log)?);
+        let encoding = config.encoding.clone();
         Ok(NullDB {
             main_log_mutex: RwLock::new(main_log),
             main_log_file_mutex: RwLock::new(false),
             main_log_memory_mutex: RwLock::new(HashMap::new()),
             log_indexes: indexes,
             config: RwLock::new(config),
-            file_engine: FileEngine::Json,
-            current_raft_index: 0,
+            file_engine: RwLock::new(FileEngine::new(encoding.as_str())),
+            current_raft_index: AtomicU64::new(0),
         })
     }
 
@@ -122,10 +129,7 @@ impl NullDB {
         self.write_value_to_log(self.file_engine.new_tombstone_record(key, index))
     }
 
-    pub fn get_latest_record_from_disk(
-        &self
-    ) -> Result<Box<dyn RecordTrait>, errors::NullDbReadError> {
-
+    pub fn get_latest_record_from_disk(&self) -> Result<Record, errors::NullDbReadError> {
         let Ok(config) = self.config.read() else {
             println!("could not get readlock on config!");
             panic!("we have poisiod our locks");
@@ -169,7 +173,8 @@ impl NullDB {
                     let path =
                         self.get_path_for_file(format!("{}-{}", current_gen, file_path.clone()));
 
-                    return get_value_from_segment(path, 0, self.file_engine)
+                    let box_value = get_value_from_segment(path, 0, &self.file_engine)?;
+                    return Ok(*box_value);
                 }
             }
         }
@@ -187,8 +192,12 @@ impl NullDB {
 
         // Check the main log first for key
         if let Some(value) = main_log.get(&key) {
-            println!("Returned value from main log! {}, {}", value.id(), value.value().unwrap());
-            return Ok(value.clone());
+            println!(
+                "Returned value from main log! {}, {}",
+                value.get_id(),
+                value.get_value().unwrap()
+            );
+            return Ok(value.get_value().unwrap());
         }
 
         let Ok(config) = self.config.read() else {
@@ -265,15 +274,35 @@ impl NullDB {
                         .try_into()
                         .unwrap();
                     println!("inner dur: {}", dur);
-                    return get_value_from_segment(path, *line_number);
+                    let thing = get_value_from_segment(path, *line_number, &self.file_engine);
+                    return thing.map(|x| x.get_value().unwrap());
                 }
             }
         }
         Ok("value not found".into())
     }
 
+    pub fn log(&self, key: String, value: String, index: u64) -> anyhow::Result<()> {
+        let tmp_index = index + 1;
+        let new_record = self.file_engine.new_record(key, tmp_index, None, Some(value));
+        self.write_value_to_log(new_record)?;
+        Ok(())
+    }
+
+    pub fn log_entries(&self, entries: Vec<LogEntry>, index: u64) -> anyhow::Result<()> {
+        
+        let mut tmp_index = index + 1;
+        for entry in entries {
+            let new_record = self.file_engine.new_record(entry.key, tmp_index, None, Some(entry.value));
+            self.write_value_to_log(new_record)?;
+            tmp_index += 1;
+        }
+
+        Ok(())
+    }
+
     // Writes value to log, will create new log if over 64 lines.
-    pub fn write_value_to_log(&self, record: Box<dyn RecordTrait>) -> anyhow::Result<()> {
+    pub fn write_value_to_log(&self, record: Record) -> anyhow::Result<()> {
         let line_count;
         {
             let main_log = self.main_log_mutex.read();
@@ -328,7 +357,7 @@ impl NullDB {
         };
 
         // Write to memory
-        let old_value = main_log_memory.insert(record.id(), record);
+        let old_value = main_log_memory.insert(record.get_id(), record.clone());
 
         let mut file = OpenOptions::new()
             .write(true)
@@ -341,9 +370,9 @@ impl NullDB {
         if ret.is_err() {
             // If we failed to write to disk, reset the memory to what it was before
             if let Some(old_value) = old_value {
-                main_log_memory.insert(record.id().clone(), old_value);
+                main_log_memory.insert(record.get_id().clone(), old_value);
             } else {
-                main_log_memory.remove(&record.id());
+                main_log_memory.remove(&record.get_id());
             }
             return Err(anyhow!("Could not write to main log file!"));
         }
@@ -370,8 +399,8 @@ impl NullDB {
 fn get_value_from_segment(
     path: PathBuf,
     line_number: usize,
-    file_engine: FileEngine,
-) -> anyhow::Result<Box<dyn RecordTrait>, errors::NullDbReadError> {
+    file_engine: &FileEngine,
+) -> anyhow::Result<Box<Record>, errors::NullDbReadError> {
     let file = OpenOptions::new()
         .read(true)
         .write(false)
@@ -390,7 +419,10 @@ fn get_value_from_segment(
     get_value_from_database(value, file_engine)
 }
 
-pub fn get_value_from_database(value: String, file_engine: FileEngine) -> anyhow::Result<Box<dyn RecordTrait>, errors::NullDbReadError> {
+pub fn get_value_from_database(
+    value: String,
+    file_engine: &FileEngine,
+) -> anyhow::Result<Box<Record>, errors::NullDbReadError> {
     file_engine.get_record_from_str(&value).map_err(|e| {
         println!("Could not parse value from database! error: {}", e);
         errors::NullDbReadError::Corrupted

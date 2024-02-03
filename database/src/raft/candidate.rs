@@ -78,7 +78,11 @@ impl CandidateState {
                 sender.send(reply).unwrap();
                 println!("Becoming Follower again. Failed to become leader because a leader already exists. +++++++!!!!!!!!!+++++++");
             }
-            RaftEvent::NewEntry { key: _, value, sender } => {
+            RaftEvent::NewEntry {
+                key: _,
+                value,
+                sender,
+            } => {
                 println!("Got a new entry: {:?}", value);
                 let reply = "I am not the leader".to_string();
                 sender.send(reply).unwrap();

@@ -1,16 +1,18 @@
-use std::time::Instant;
+use std::{time::Instant, sync::atomic::Ordering};
 
-use crate::raft::{follower::FollowerState, leader::LeaderState, raft};
+use actix_web::web::Data;
 
-use super::{config::RaftConfig, grpcserver::RaftEvent, RaftClients, RaftLog, State};
+use crate::{raft::{follower::FollowerState, leader::LeaderState, raft}, nulldb::NullDB, errors::NullDbReadError};
+
+use super::{config::RaftConfig, grpcserver::RaftEvent, RaftClients, State};
 pub struct CandidateState {
     pub yes_votes: i32,
     pub no_votes: i32,
-    pub current_term: i32,
+    pub current_term: u32,
 }
 
 impl CandidateState {
-    pub fn new(current_term: i32) -> CandidateState {
+    pub fn new(current_term: u32) -> CandidateState {
         CandidateState {
             yes_votes: 1,
             no_votes: 0,
@@ -21,15 +23,16 @@ impl CandidateState {
     pub async fn tick(
         &mut self,
         config: &RaftConfig,
-        log: &RaftLog,
+        log: Data<NullDB>,
         clients: &mut RaftClients,
     ) -> Option<State> {
+        let num_clients = clients.len() as i32;
         for nodes in clients.values_mut() {
             let mut node = nodes.clone();
             let request = tonic::Request::new(raft::VoteRequest {
                 term: self.current_term,
                 candidate_id: config.candidate_id.clone(),
-                last_log_index: log.log_index,
+                last_log_index: log.current_raft_index.load(Ordering::Relaxed),
                 last_log_term: self.current_term,
             });
             let response = node.vote(request).await.unwrap().into_inner();
@@ -45,9 +48,8 @@ impl CandidateState {
                     response.term,
                 )));
             }
-            let length = log.len() as i32;
 
-            if self.yes_votes > length / 2 {
+            if self.yes_votes > num_clients / 2 {
                 println!("Becoming Leader. Won election. +++++++!!!!!!!!!+++++++");
                 return Some(State::Leader(LeaderState::new(
                     Instant::now(),
@@ -89,7 +91,7 @@ impl CandidateState {
             }
             RaftEvent::GetEntry(key, sender) => {
                 println!("Got a get entry request: {:?}", key);
-                sender.send("Not the leader".to_string()).unwrap();
+                sender.send(Err(NullDbReadError::NotLeader)).unwrap();
             }
         }
         None

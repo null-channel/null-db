@@ -6,6 +6,7 @@ pub enum NullDbReadError {
     ValueDeleted,
     IOError(Error),
     Corrupted,
+    NotLeader,
 }
 
 impl std::fmt::Display for NullDbReadError {

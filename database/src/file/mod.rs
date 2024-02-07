@@ -88,6 +88,7 @@ impl Record {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum FileEngine {
     Json,
     Html,
@@ -104,19 +105,19 @@ impl FileEngine {
         }
     }
 
-    pub fn get_record_from_str(&self, value: &str) -> anyhow::Result<Box<Record>> {
+    pub fn get_record_from_str(&self, value: &str) -> anyhow::Result<Record> {
         match self {
             FileEngine::Json => {
                 let json: JsonRecord = serde_json::from_str(value)?;
-                Ok(Box::new(Record::Json(json)))
+                Ok(Record::Json(json))
             }
             FileEngine::Html => {
                 let html: HtmlRecord = from_str(value)?;
-                Ok(Box::new(Record::Html(html)))
+                Ok(Record::Html(html))
             }
             FileEngine::Proto => {
                 let proto: proto::ProtoRecord = proto::ProtoRecord::decode(value.as_bytes())?;
-                Ok(Box::new(Record::Proto(proto)))
+                Ok(Record::Proto(proto))
             }
         }
     }

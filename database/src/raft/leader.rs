@@ -2,18 +2,18 @@ use std::time::{Duration, Instant};
 
 use actix_web::web::Data;
 
-use crate::{raft::raft, nulldb::NullDB, file::Record};
+use crate::{raft::raft, nulldb::NullDB, errors::NullDbReadError};
 
 use super::{config::RaftConfig, grpcserver::RaftEvent, RaftClients, State};
 
 pub struct LeaderState {
-    pub term: i32,
-    pub log_index: i32,
+    pub term: u32,
+    pub log_index: u64,
     pub last_heartbeat: Instant,
 }
 
 impl LeaderState {
-    pub fn new(last_heartbeat: Instant, term: i32) -> LeaderState {
+    pub fn new(last_heartbeat: Instant, term: u32) -> LeaderState {
         LeaderState {
             term,
             log_index: 0,
@@ -88,8 +88,7 @@ impl LeaderState {
                 println!("Got a new entry: {}:{}", key, value);
                 //log entry
 
-                log.push((key.clone(), value.clone(), self.log_index));
-                log.log_index += 1;
+                log.log(key.clone(), value.clone(), self.log_index);
 
                 let mut success = 1;
                 // Send append entries to all other nodes
@@ -121,10 +120,10 @@ impl LeaderState {
             }
             RaftEvent::GetEntry(key, sender) => {
                 println!("Got a get entry request: {:?}", key);
-                if let Some(entry) = log.get(&key) {
-                    sender.send(entry.clone()).unwrap();
+                if let Ok(entry) = log.get_value_for_key(key) {
+                    sender.send(Ok(entry.clone())).unwrap();
                 } else {
-                    sender.send("No entry".to_string()).unwrap();
+                    sender.send(Err(NullDbReadError::ValueNotFound)).unwrap();
                 }
             }
         }

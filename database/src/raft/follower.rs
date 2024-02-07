@@ -2,17 +2,17 @@ use std::time::Instant;
 
 use actix_web::web::Data;
 
-use crate::{raft::{candidate::CandidateState, raft}, nulldb::NullDB};
+use crate::{raft::{candidate::CandidateState, raft}, nulldb::NullDB, errors::NullDbReadError};
 
-use super::{grpcserver::RaftEvent, RaftLog, State, TIME_OUT};
+use super::{grpcserver::RaftEvent, State, TIME_OUT};
 
 pub struct FollowerState {
     pub last_heartbeat: Instant,
-    pub term: i32,
+    pub term: u32,
 }
 
 impl FollowerState {
-    pub fn new(last_heartbeat: Instant, term: i32) -> FollowerState {
+    pub fn new(last_heartbeat: Instant, term: u32) -> FollowerState {
         FollowerState {
             last_heartbeat,
             term,
@@ -56,7 +56,7 @@ impl FollowerState {
             }
             RaftEvent::AppendEntriesRequest(request, sender) => {
                 println!("Got an append entries request!");
-                log.push_entries(request.entries);
+                log.log_entries(request.entries, log.current_raft_index.load(std::sync::atomic::Ordering::Relaxed));
                 let reply = raft::AppendEntriesReply {
                     term: self.term,
                     success: true,
@@ -77,7 +77,7 @@ impl FollowerState {
             RaftEvent::GetEntry(key, sender) => {
                 //TODO: Proxy the request to the leader
                 println!("Got a get entry request: {:?}", key);
-                sender.send("Not the leader".to_string()).unwrap();
+                sender.send(Err(NullDbReadError::NotLeader)).unwrap();
             }
         }
         None

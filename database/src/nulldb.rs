@@ -12,7 +12,7 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::RwLock;
 use std::time;
@@ -28,8 +28,8 @@ pub struct NullDB {
     // Segment, Index
     log_indexes: RwLock<HashMap<PathBuf, Index>>,
     pub config: RwLock<Config>,
-    file_engine: RwLock<FileEngine>,
-    current_raft_index: AtomicU64,
+    file_engine: FileEngine,
+    pub current_raft_index: AtomicU64,
 }
 
 #[derive(Clone, Debug)]
@@ -97,7 +97,7 @@ impl NullDB {
             main_log_memory_mutex: RwLock::new(HashMap::new()),
             log_indexes: indexes,
             config: RwLock::new(config),
-            file_engine: RwLock::new(FileEngine::new(encoding.as_str())),
+            file_engine: FileEngine::new(encoding.as_str()),
             current_raft_index: AtomicU64::new(0),
         })
     }
@@ -125,8 +125,7 @@ impl NullDB {
 
     // Deletes a record from the log
     pub fn delete_record(&self, key: String) -> anyhow::Result<()> {
-        let index = self.current_raft_index;
-        self.write_value_to_log(self.file_engine.new_tombstone_record(key, index))
+        self.write_value_to_log(self.file_engine.new_tombstone_record(key, self.current_raft_index.load(Ordering::Relaxed)))
     }
 
     pub fn get_latest_record_from_disk(&self) -> Result<Record, errors::NullDbReadError> {
@@ -173,8 +172,7 @@ impl NullDB {
                     let path =
                         self.get_path_for_file(format!("{}-{}", current_gen, file_path.clone()));
 
-                    let box_value = get_value_from_segment(path, 0, &self.file_engine)?;
-                    return Ok(*box_value);
+                    return get_value_from_segment(path, 0, &self.file_engine);
                 }
             }
         }
@@ -183,7 +181,7 @@ impl NullDB {
     pub fn get_value_for_key(
         &self,
         key: String,
-    ) -> anyhow::Result<String, errors::NullDbReadError> {
+    ) -> anyhow::Result<Record, errors::NullDbReadError> {
         // Aquire read lock on main log in memory
         let Ok(main_log) = self.main_log_memory_mutex.read() else {
             println!("Could not get main log file!");
@@ -197,7 +195,7 @@ impl NullDB {
                 value.get_id(),
                 value.get_value().unwrap()
             );
-            return Ok(value.get_value().unwrap());
+            return Ok(value.clone());
         }
 
         let Ok(config) = self.config.read() else {
@@ -274,12 +272,11 @@ impl NullDB {
                         .try_into()
                         .unwrap();
                     println!("inner dur: {}", dur);
-                    let thing = get_value_from_segment(path, *line_number, &self.file_engine);
-                    return thing.map(|x| x.get_value().unwrap());
+                    return get_value_from_segment(path, *line_number, &self.file_engine);
                 }
             }
         }
-        Ok("value not found".into())
+        Err(errors::NullDbReadError::ValueNotFound)
     }
 
     pub fn log(&self, key: String, value: String, index: u64) -> anyhow::Result<()> {
@@ -400,7 +397,7 @@ fn get_value_from_segment(
     path: PathBuf,
     line_number: usize,
     file_engine: &FileEngine,
-) -> anyhow::Result<Box<Record>, errors::NullDbReadError> {
+) -> anyhow::Result<Record, errors::NullDbReadError> {
     let file = OpenOptions::new()
         .read(true)
         .write(false)
@@ -422,7 +419,7 @@ fn get_value_from_segment(
 pub fn get_value_from_database(
     value: String,
     file_engine: &FileEngine,
-) -> anyhow::Result<Box<Record>, errors::NullDbReadError> {
+) -> anyhow::Result<Record, errors::NullDbReadError> {
     file_engine.get_record_from_str(&value).map_err(|e| {
         println!("Could not parse value from database! error: {}", e);
         errors::NullDbReadError::Corrupted

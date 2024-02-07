@@ -82,7 +82,7 @@ impl RaftNode {
     async fn run_tick(&mut self) -> Option<State> {
         let state = self
             .state
-            .tick(&self.config, self.log, &mut self.raft_clients)
+            .tick(&self.config, self.log.clone(), &mut self.raft_clients)
             .await;
         if state.is_some() {
             return state;
@@ -91,7 +91,7 @@ impl RaftNode {
         match self.receiver.try_recv() {
             Ok(event) => {
                 self.state
-                    .on_message(event, &self.config, &mut self.raft_clients, self.log)
+                    .on_message(event, &self.config, &mut self.raft_clients, self.log.clone())
                     .await
             }
             Err(_) => None,

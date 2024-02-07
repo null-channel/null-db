@@ -50,7 +50,7 @@ async fn main() -> Result<(), std::io::Error> {
     let config = Config::new(args.dir, args.compaction, args.encoding.clone());
     let raft_config = raft::config::RaftConfig::new(args.id.clone(), nodes.clone());
     let db_mutex = create_db(config).expect("could not start db");
-    let mut raft = raft::RaftNode::new(raft_config, receiver);
+    let mut raft = raft::RaftNode::new(raft_config, receiver, db_mutex.clone());
     let tx = sender.clone();
     tokio::spawn(async move {
         let _ = raft.run(tx).await;
@@ -102,7 +102,7 @@ async fn get_value_for_key(
         Err(e) => {
             HttpResponse::InternalServerError().body(format!("Issue getting value for key: {}", e))
         }
-        Ok(value) => HttpResponse::Ok().body(value),
+        Ok(value) => HttpResponse::Ok().body(value.unwrap().get_value().unwrap_or("".to_string())),
     }
 }
 

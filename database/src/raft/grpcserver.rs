@@ -2,6 +2,8 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tonic::{Request, Response, Status};
 
+use crate::{file::Record, errors::NullDbReadError};
+
 use super::raft::{AppendEntriesReply, AppendEntriesRequest, VoteReply, VoteRequest};
 
 pub struct RaftGRPCServer {
@@ -16,7 +18,7 @@ pub enum RaftEvent {
         value: String,
         sender: oneshot::Sender<String>,
     },
-    GetEntry(String, oneshot::Sender<String>),
+    GetEntry(String, oneshot::Sender<Result<Record,NullDbReadError>>),
 }
 
 #[tonic::async_trait]

@@ -1,9 +1,7 @@
 use std::time::Instant;
-
+use log::info;
 use actix_web::web::Data;
-
 use crate::{raft::{candidate::CandidateState, raft}, nulldb::NullDB, errors::NullDbReadError};
-
 use super::{grpcserver::RaftEvent, State, TIME_OUT};
 
 pub struct FollowerState {
@@ -32,8 +30,8 @@ impl FollowerState {
     pub fn on_message(&mut self, message: RaftEvent, log: Data<NullDB>) -> Option<State> {
         match message {
             RaftEvent::VoteRequest(request, sender) => {
-                println!("Got a vote request: {:?}", request);
-                if request.term > self.term {
+                info!("Got a vote request: {:?}", request);
+                if request.term >= self.term {
                     println!("voting yes");
                     //TODO: Do we up the term now? or do we wait until we get a heartbeat?
                     // term = request.term;
@@ -47,7 +45,7 @@ impl FollowerState {
                         self.term,
                     )));
                 }
-                println!("voting no");
+                info!("voting no");
                 let reply = raft::VoteReply {
                     term: self.term,
                     vote_granted: false,
@@ -55,8 +53,17 @@ impl FollowerState {
                 sender.send(reply).unwrap();
             }
             RaftEvent::AppendEntriesRequest(request, sender) => {
-                println!("Got an append entries request!");
-                log.log_entries(request.entries, log.current_raft_index.load(std::sync::atomic::Ordering::Relaxed));
+                info!("Got an append entries request!");
+                let res = log.log_entries(request.entries, log.current_raft_index.load(std::sync::atomic::Ordering::Relaxed));
+                if res.is_err() {
+                    println!("Failed to append entries: {:?}", res.err().unwrap());
+                    let reply = raft::AppendEntriesReply {
+                        term: self.term,
+                        success: false,
+                    };
+                    sender.send(reply).unwrap();
+                    return None;
+                }
                 let reply = raft::AppendEntriesReply {
                     term: self.term,
                     success: true,

@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use log::info;
 
 use actix_web::web::Data;
 
@@ -23,7 +24,7 @@ impl LeaderState {
 
     pub async fn tick(&mut self, config: &RaftConfig, clients: &mut RaftClients) -> Option<State> {
         if self.last_heartbeat.elapsed() > Duration::from_millis(100) {
-            println!("Sending heartbeat");
+            info!("Sending heartbeat");
             self.last_heartbeat = Instant::now();
             for nodes in clients.values_mut() {
                 let mut node = nodes.clone();
@@ -37,7 +38,7 @@ impl LeaderState {
                 });
                 let response = node.append_entries(request).await.unwrap();
                 if !response.get_ref().success {
-                    println!(
+                    info!(
                         "Becoming Follower. Failed to send heartbeat. +++++++!!!!!!!!!+++++++"
                     );
                     return None;
@@ -56,7 +57,7 @@ impl LeaderState {
     ) -> Option<State> {
         match message {
             RaftEvent::VoteRequest(request, sender) => {
-                println!("Got a vote request: {:?}", request);
+                info!("Got a vote request: {:?}", request);
                 if request.term > self.term {
                     self.term = request.term;
                     let reply = raft::VoteReply {
@@ -88,7 +89,12 @@ impl LeaderState {
                 println!("Got a new entry: {}:{}", key, value);
                 //log entry
 
-                log.log(key.clone(), value.clone(), self.log_index);
+                let res = log.log(key.clone(), value.clone(), self.log_index);
+
+                if res.is_err() {
+                    sender.send("Failure to log".to_string()).unwrap();
+                    return None;
+                }
 
                 let mut success = 1;
                 // Send append entries to all other nodes

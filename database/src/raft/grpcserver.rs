@@ -1,6 +1,7 @@
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tonic::{Request, Response, Status};
+use log::info;
 
 use crate::{file::Record, errors::NullDbReadError};
 
@@ -24,13 +25,16 @@ pub enum RaftEvent {
 #[tonic::async_trait]
 impl super::raft::raft_server::Raft for RaftGRPCServer {
     async fn vote(&self, request: Request<VoteRequest>) -> Result<Response<VoteReply>, Status> {
-        println!("Got a request: {:?}", request);
+        info!("Got a request: {:?}", request);
         let (sender, receiver) = oneshot::channel();
-        let _ = self
+        let res = self
             .event_sender
             .send(RaftEvent::VoteRequest(request.into_inner(), sender))
             .await
             .map_err(|_| Status::internal("Failed to send vote request"));
+        if let Err(_) = res {
+            return Err(Status::internal("Failed to send vote request"));
+        };
         return Ok(Response::new(
             receiver
                 .await

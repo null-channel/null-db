@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use env_logger;
 
 use crate::nulldb::create_db;
 use actix_web::{
@@ -42,11 +43,12 @@ struct Args {
 
 #[actix_web::main]
 async fn main() -> Result<(), std::io::Error> {
+    env_logger::init();
     let args = Args::parse();
 
     let nodes = args.roster.split(",").collect::<Vec<&str>>();
 
-    let (sender, receiver) = tokio::sync::mpsc::channel(100);
+    let (sender, receiver) = tokio::sync::mpsc::channel(1000);
     let config = Config::new(args.dir, args.compaction, args.encoding.clone());
     let raft_config = raft::config::RaftConfig::new(args.id.clone(), nodes.clone());
     let db_mutex = create_db(config).expect("could not start db");
@@ -102,7 +104,12 @@ async fn get_value_for_key(
         Err(e) => {
             HttpResponse::InternalServerError().body(format!("Issue getting value for key: {}", e))
         }
-        Ok(value) => HttpResponse::Ok().body(value.unwrap().get_value().unwrap_or("".to_string())),
+        Ok(value) => {
+            match value {
+                Ok(res) => HttpResponse::Ok().body(res.get_value().unwrap_or("No Value".to_string())),
+                Err(e) => HttpResponse::InternalServerError().body(format!("Issue getting value for key: {}", e)),
+            }
+        }
     }
 }
 

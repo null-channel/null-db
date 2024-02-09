@@ -3,7 +3,7 @@ pub mod config;
 mod follower;
 pub mod grpcserver;
 mod leader;
-
+use log::info;
 use actix_web::web::Data;
 use raft::raft_server::RaftServer;
 use std::{
@@ -68,7 +68,7 @@ impl RaftNode {
                 nameport[0].to_string(),
                 nameport[1].to_string()
             );
-            println!("Connecting to {}", ip);
+            info!("Connecting to {}", ip);
             let raft_client = raft::raft_client::RaftClient::connect(ip).await.unwrap();
             self.raft_clients.insert(node.to_string(), raft_client);
         }
@@ -90,6 +90,7 @@ impl RaftNode {
 
         match self.receiver.try_recv() {
             Ok(event) => {
+            info!("Got a message");
                 self.state
                     .on_message(event, &self.config, &mut self.raft_clients, self.log.clone())
                     .await

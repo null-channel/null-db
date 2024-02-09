@@ -8,5 +8,6 @@ RUN cargo build
 
 FROM rust:1.74.1
 COPY --from=builder /project/target/debug/ /usr/local/bin/
+WORKDIR /db/
 CMD ["null-db"]
 

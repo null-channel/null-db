@@ -1,22 +1,27 @@
 use std::{time::Instant, sync::atomic::Ordering};
-
+use log::info;
 use actix_web::web::Data;
+use tokio::sync::oneshot::Receiver;
 
 use crate::{raft::{follower::FollowerState, leader::LeaderState, raft}, nulldb::NullDB, errors::NullDbReadError};
 
-use super::{config::RaftConfig, grpcserver::RaftEvent, RaftClients, State};
+use super::{config::RaftConfig, grpcserver::RaftEvent, RaftClients, State, raft::VoteReply};
 pub struct CandidateState {
+    pub has_voted: bool,
     pub yes_votes: i32,
     pub no_votes: i32,
     pub current_term: u32,
+    votes: Vec<Receiver<VoteReply>>,
 }
 
 impl CandidateState {
     pub fn new(current_term: u32) -> CandidateState {
         CandidateState {
+            has_voted: false,
             yes_votes: 1,
             no_votes: 0,
             current_term,
+            votes: vec![],
         }
     }
 
@@ -27,6 +32,42 @@ impl CandidateState {
         clients: &mut RaftClients,
     ) -> Option<State> {
         let num_clients = clients.len() as i32;
+
+        let mut voters = vec![];
+        while let Some(mut vote) = self.votes.pop() {
+            let response = vote.try_recv();
+            let Ok(response) = response else {
+                voters.push(vote);
+                continue;
+            };
+
+            if response.vote_granted {
+                self.yes_votes += 1;
+            } else {
+                self.no_votes += 1;
+            }
+            
+            if response.term > self.current_term {
+                info!("Becoming Follower. Lost election. +++++++!!!!!!!!!+++++++");
+                return Some(State::Follower(FollowerState::new(
+                    Instant::now(),
+                    response.term,
+                )));
+            }
+
+            if self.yes_votes > num_clients / 2 {
+                info!("Becoming Leader. Won election. +++++++!!!!!!!!!+++++++");
+                return Some(State::Leader(LeaderState::new(
+                    Instant::now(),
+                    self.current_term,
+                )));
+            }
+        }
+        self.votes = voters;
+
+        if self.has_voted {
+            return None;
+        }
         for nodes in clients.values_mut() {
             let mut node = nodes.clone();
             let request = tonic::Request::new(raft::VoteRequest {
@@ -35,36 +76,25 @@ impl CandidateState {
                 last_log_index: log.current_raft_index.load(Ordering::Relaxed),
                 last_log_term: self.current_term,
             });
-            let response = node.vote(request).await.unwrap().into_inner();
-            if response.vote_granted {
-                self.yes_votes += 1;
-            } else {
-                self.no_votes += 1;
-            }
-            if response.term > self.current_term {
-                println!("Becoming Follower. Lost election. +++++++!!!!!!!!!+++++++");
-                return Some(State::Follower(FollowerState::new(
-                    Instant::now(),
-                    response.term,
-                )));
-            }
 
-            if self.yes_votes > num_clients / 2 {
-                println!("Becoming Leader. Won election. +++++++!!!!!!!!!+++++++");
-                return Some(State::Leader(LeaderState::new(
-                    Instant::now(),
-                    self.current_term,
-                )));
-            }
+            info!("Sending vote request to node: {:?}", node);
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            self.votes.push(receiver);
+            tokio::spawn(async move {
+                info!("inside spawn: {:?}", node);
+                let response = node.vote(request).await.unwrap().into_inner();
+                sender.send(response).unwrap();
+            });
         }
+        self.has_voted = true;
         None
     }
 
     pub fn on_message(&mut self, message: RaftEvent) -> Option<State> {
         match message {
             RaftEvent::VoteRequest(request, sender) => {
-                println!("vote request: {:?}", request);
-                println!("voting no");
+                info!("vote request: {:?}", request);
+                info!("voting no");
                 let reply = raft::VoteReply {
                     term: self.current_term,
                     vote_granted: false,
@@ -72,25 +102,25 @@ impl CandidateState {
                 sender.send(reply).unwrap()
             }
             RaftEvent::AppendEntriesRequest(request, sender) => {
-                println!("Got an append entries request: {:?}", request);
+                info!("Got an append entries request: {:?}", request);
                 let reply = raft::AppendEntriesReply {
                     term: self.current_term,
                     success: true,
                 };
                 sender.send(reply).unwrap();
-                println!("Becoming Follower again. Failed to become leader because a leader already exists. +++++++!!!!!!!!!+++++++");
+                info!("Becoming Follower again. Failed to become leader because a leader already exists. +++++++!!!!!!!!!+++++++");
             }
             RaftEvent::NewEntry {
                 key: _,
                 value,
                 sender,
             } => {
-                println!("Got a new entry: {:?}", value);
+                info!("Got a new entry: {:?}", value);
                 let reply = "I am not the leader".to_string();
                 sender.send(reply).unwrap();
             }
             RaftEvent::GetEntry(key, sender) => {
-                println!("Got a get entry request: {:?}", key);
+                info!("Got a get entry request: {:?}", key);
                 sender.send(Err(NullDbReadError::NotLeader)).unwrap();
             }
         }

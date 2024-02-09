@@ -2,9 +2,13 @@ services:
   node1:
     build: .
     command: 'null-db --roster=node2:3001,node3:3002 --id=3000'
+    environment:
+      - RUST_LOG=info
     ports:
       - 3000:3000
       - 30001:8080
+    volumes:
+      - ./node1:/db
     develop:
       watch:
         - action: rebuild
@@ -13,9 +17,13 @@ services:
   node2:
     build: .
     command: 'null-db --roster=node1:3000,node3:3002 --id=3001'
+    environment:
+      - RUST_LOG=info
     ports:
       - 3001:3001
       - 30011:8080
+    volumes:
+      - ./node2:/db
     develop:
       watch:
         - action: rebuild
@@ -24,9 +32,13 @@ services:
   node3:
     build: .
     command: 'null-db --roster=node2:3001,node1:3000 --id=3002'
+    environment:
+      - RUST_LOG=info
     ports:
       - 3002:3002
       - 30021:8080
+    volumes:
+      - ./node3:/db
     develop:
       watch:
         - action: rebuild

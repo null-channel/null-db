@@ -17,7 +17,7 @@ pub enum RaftEvent {
     NewEntry {
         key: String,
         value: String,
-        sender: oneshot::Sender<String>,
+        sender: oneshot::Sender<Result<(),NullDbReadError>>,
     },
     GetEntry(String, oneshot::Sender<Result<Record,NullDbReadError>>),
 }

@@ -35,8 +35,10 @@ impl CandidateState {
 
         let mut voters = vec![];
         while let Some(mut vote) = self.votes.pop() {
+            info!("Checking vote inner loop");
             let response = vote.try_recv();
             let Ok(response) = response else {
+                info!("Vote not ready");
                 voters.push(vote);
                 continue;
             };
@@ -48,28 +50,39 @@ impl CandidateState {
             }
             
             if response.term > self.current_term {
-                info!("Becoming Follower. Lost election. +++++++!!!!!!!!!+++++++");
+                info!("Becoming Follower. Lost election due to term. +++++++!!!!!!!!!+++++++");
                 return Some(State::Follower(FollowerState::new(
                     Instant::now(),
                     response.term,
                 )));
             }
 
-            if self.yes_votes > num_clients / 2 {
+            if self.yes_votes > (num_clients / 2) {
                 info!("Becoming Leader. Won election. +++++++!!!!!!!!!+++++++");
                 return Some(State::Leader(LeaderState::new(
                     Instant::now(),
                     self.current_term,
                 )));
             }
+
+            if self.no_votes > (num_clients / 2) {
+                info!("Becoming Follower. Lost election. !!!!!!!!!+++++++!!!!!!!!!!");
+                return Some(State::Follower(FollowerState::new(
+                    Instant::now(),
+                    response.term,
+                )));
+            }
         }
         self.votes = voters;
+        info!("Number of votes: {:?}", self.votes);
 
         if self.has_voted {
             return None;
         }
+        info!("Sending vote requests to all nodes");
         for nodes in clients.values_mut() {
-            let mut node = nodes.clone();
+            info!("Sending vote request to node: {:?}", nodes);
+            let node = nodes.clone();
             let request = tonic::Request::new(raft::VoteRequest {
                 term: self.current_term,
                 candidate_id: config.candidate_id.clone(),
@@ -80,9 +93,10 @@ impl CandidateState {
             info!("Sending vote request to node: {:?}", node);
             let (sender, receiver) = tokio::sync::oneshot::channel();
             self.votes.push(receiver);
+            let mut n = node.clone();
             tokio::spawn(async move {
                 info!("inside spawn: {:?}", node);
-                let response = node.vote(request).await.unwrap().into_inner();
+                let response = n.vote(request).await.unwrap().into_inner();
                 sender.send(response).unwrap();
             });
         }
@@ -116,8 +130,7 @@ impl CandidateState {
                 sender,
             } => {
                 info!("Got a new entry: {:?}", value);
-                let reply = "I am not the leader".to_string();
-                sender.send(reply).unwrap();
+                sender.send(Err(NullDbReadError::NotLeader)).unwrap();
             }
             RaftEvent::GetEntry(key, sender) => {
                 info!("Got a get entry request: {:?}", key);

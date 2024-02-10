@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use env_logger;
+use errors::NullDbReadError;
 
 use crate::nulldb::create_db;
 use actix_web::{
@@ -63,7 +64,6 @@ async fn main() -> Result<(), std::io::Error> {
     HttpServer::new(move || {
         App::new()
             .app_data(sender_ark.clone())
-            //.app_data(db_mutex.clone())
             .service(get_value_for_key)
             .service(put_value_for_key)
             .service(delete_value_for_key)
@@ -85,18 +85,6 @@ async fn get_value_for_key(
     sender: Data<Sender<RaftEvent>>,
     request: web::Path<String>,
 ) -> impl Responder {
-    /*
-    let key = request.into_inner();
-
-    let then = time::Instant::now();
-
-    let ret = db.get_value_for_key(key.clone());
-
-    let dur: u128 = ((time::Instant::now() - then).as_millis())
-        .try_into()
-        .unwrap();
-    println!("duration: {}", dur);
-    */
     let (tx, receiver) = tokio::sync::oneshot::channel();
     let event = RaftEvent::GetEntry(request.into_inner(), tx);
     let _ret = sender.send(event).await;
@@ -121,7 +109,6 @@ async fn get_index() -> impl Responder {
 #[post("/v1/data/{key}")]
 pub async fn put_value_for_key(
     sender: Data<Sender<RaftEvent>>,
-    //db: Data<NullDB>,
     key: web::Path<String>,
     req_body: String,
 ) -> impl Responder {
@@ -137,8 +124,18 @@ pub async fn put_value_for_key(
     let ret = receiver.await;
 
     match ret {
-        Err(_) => HttpResponse::InternalServerError(),
-        Ok(_) => HttpResponse::Ok(),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Issue writing: {}", e)),
+        Ok(res) => {
+            match res {
+                Ok(_) => HttpResponse::Ok().body("Record written".to_string()),
+                Err(e) => {
+                    match e {
+                        NullDbReadError::NotLeader => HttpResponse::MisdirectedRequest().body("I'm not the leader"),
+                        _ => HttpResponse::InternalServerError().body(format!("Issue writing")),
+                    }
+                }
+            }
+        }
     }
 }
 

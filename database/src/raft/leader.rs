@@ -91,8 +91,8 @@ impl LeaderState {
 
                 let res = log.log(key.clone(), value.clone(), self.log_index);
 
-                if res.is_err() {
-                    sender.send("Failure to log".to_string()).unwrap();
+                if let Err(err) = res {
+                    sender.send(Err(err)).unwrap();
                     return None;
                 }
 
@@ -119,9 +119,9 @@ impl LeaderState {
                 }
 
                 if success > config.roster.len() / 2 {
-                    sender.send("Success".to_string()).unwrap();
+                    sender.send(Ok(())).unwrap();
                 } else {
-                    sender.send("Failure".to_string()).unwrap();
+                    sender.send(Err(NullDbReadError::FailedToReplicate)).unwrap();
                 }
             }
             RaftEvent::GetEntry(key, sender) => {

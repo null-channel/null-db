@@ -7,6 +7,8 @@ pub enum NullDbReadError {
     IOError(Error),
     Corrupted,
     NotLeader,
+    FailedToObtainMainLog,
+    FailedToReplicate,
 }
 
 impl std::fmt::Display for NullDbReadError {

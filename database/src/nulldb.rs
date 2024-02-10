@@ -1,3 +1,4 @@
+use crate::errors::NullDbReadError;
 use crate::file::{FileEngine, Record};
 use crate::index;
 use crate::index::*;
@@ -9,7 +10,7 @@ use anyhow::anyhow;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::OpenOptions;
-use std::io::prelude::*;
+use std::io::{prelude::*, self};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -102,7 +103,7 @@ impl NullDB {
         })
     }
 
-    fn create_next_segment_file(path: &Path) -> anyhow::Result<PathBuf> {
+    fn create_next_segment_file(path: &Path) -> anyhow::Result<PathBuf,io::Error> {
         let time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -124,7 +125,7 @@ impl NullDB {
     }
 
     // Deletes a record from the log
-    pub fn delete_record(&self, key: String) -> anyhow::Result<()> {
+    pub fn delete_record(&self, key: String) -> anyhow::Result<(),NullDbReadError> {
         self.write_value_to_log(self.file_engine.new_tombstone_record(key, self.current_raft_index.load(Ordering::Relaxed)))
     }
 
@@ -279,14 +280,14 @@ impl NullDB {
         Err(errors::NullDbReadError::ValueNotFound)
     }
 
-    pub fn log(&self, key: String, value: String, index: u64) -> anyhow::Result<()> {
+    pub fn log(&self, key: String, value: String, index: u64) -> anyhow::Result<(),NullDbReadError> {
         let tmp_index = index + 1;
         let new_record = self.file_engine.new_record(key, tmp_index, None, Some(value));
         self.write_value_to_log(new_record)?;
         Ok(())
     }
 
-    pub fn log_entries(&self, entries: Vec<LogEntry>, index: u64) -> anyhow::Result<()> {
+    pub fn log_entries(&self, entries: Vec<LogEntry>, index: u64) -> anyhow::Result<(),NullDbReadError> {
         
         let mut tmp_index = index + 1;
         for entry in entries {
@@ -299,15 +300,18 @@ impl NullDB {
     }
 
     // Writes value to log, will create new log if over 64 lines.
-    pub fn write_value_to_log(&self, record: Record) -> anyhow::Result<()> {
+    pub fn write_value_to_log(&self, record: Record) -> anyhow::Result<(),NullDbReadError> {
         let line_count;
         {
             let main_log = self.main_log_mutex.read();
             let Ok(main_log) = main_log else {
                 println!("Could not get main log file!");
-                return Err(anyhow!("Could not get main log file!"));
+                return Err(NullDbReadError::FailedToObtainMainLog);
             };
-            let file = File::open(main_log.clone())?;
+            let file = File::open(main_log.clone()).map_err(|e| {
+                println!("Could not open main log file! error: {}", e);
+                NullDbReadError::IOError(e)
+            })?;
             // make new file if over our 64 lines max
             let f = BufReader::new(file);
             line_count = f.lines().count();
@@ -317,7 +321,7 @@ impl NullDB {
         if line_count > 5120 {
             let main_log = self.main_log_mutex.write();
             let Ok(mut main_log) = main_log else {
-                return Err(anyhow!("Could not get main log file!"));
+                return Err(NullDbReadError::FailedToObtainMainLog);
             };
             let Some(index) = index::generate_index_for_segment(&main_log) else {
                 panic!("could not create index of main log");
@@ -335,22 +339,25 @@ impl NullDB {
                 println!("could not get readlock on config!");
                 panic!("we have poisiod our locks");
             };
-            *main_log = Self::create_next_segment_file(config.path.as_path())?;
+            *main_log = Self::create_next_segment_file(config.path.as_path()).map_err(|e| {
+                println!("Could not create new main log file! error: {}", e);
+                NullDbReadError::IOError(e)
+            })?;
         }
 
         // Aquire write lock on main log file
         let Ok(_main_log_disk) = self.main_log_file_mutex.write() else {
-            return Err(anyhow!("Could not get main log file!"));
+            return Err(NullDbReadError::FailedToObtainMainLog);
         };
 
         // Aquire write lock on main log memory
         let Ok(mut main_log_memory) = self.main_log_memory_mutex.write() else {
-            return Err(anyhow!("Could not get main log in memory!"));
+            return Err(NullDbReadError::FailedToObtainMainLog);
         };
 
         // Aquire read lock on main log file name
         let Ok(main_log_name) = self.main_log_mutex.read() else {
-            return Err(anyhow!("Could not get main log file name!"));
+            return Err(NullDbReadError::FailedToObtainMainLog);
         };
 
         // Write to memory
@@ -359,21 +366,24 @@ impl NullDB {
         let mut file = OpenOptions::new()
             .write(true)
             .append(true)
-            .open(main_log_name.clone())?;
+            .open(main_log_name.clone()).map_err(|e| {
+                println!("Could not open main log file! error: {}", e);
+                NullDbReadError::IOError(e)
+            })?;
 
         let rec = record.serialize();
         let ret = writeln!(file, "{}", rec);
 
-        if ret.is_err() {
-            // If we failed to write to disk, reset the memory to what it was before
-            if let Some(old_value) = old_value {
-                main_log_memory.insert(record.get_id().clone(), old_value);
-            } else {
-                main_log_memory.remove(&record.get_id());
-            }
-            return Err(anyhow!("Could not write to main log file!"));
+        let Err(e) = ret else { 
+            return Ok(());
+        };
+        // If we failed to write to disk, reset the memory to what it was before
+        if let Some(old_value) = old_value {
+            main_log_memory.insert(record.get_id().clone(), old_value);
+        } else {
+            main_log_memory.remove(&record.get_id());
         }
-        Ok(())
+        return Err(NullDbReadError::IOError(e));
     }
 
     pub fn add_index(&self, segment: PathBuf, index: Index) -> Option<Index> {

@@ -32,9 +32,7 @@ impl FollowerState {
             RaftEvent::VoteRequest(request, sender) => {
                 info!("Got a vote request: {:?}", request);
                 if request.term >= self.term {
-                    println!("voting yes");
-                    //TODO: Do we up the term now? or do we wait until we get a heartbeat?
-                    // term = request.term;
+                    info!("voting yes");
                     let reply = raft::VoteReply {
                         term: self.term,
                         vote_granted: true,
@@ -78,8 +76,7 @@ impl FollowerState {
             } => {
                 println!("Got a new entry: {:?}", value);
                 //TODO: Proxy the request to the leader
-                let reply = "I am not the leader".to_string();
-                let _ = sender.send(reply).unwrap();
+                let _ = sender.send(Err(NullDbReadError::NotLeader)).unwrap();
             }
             RaftEvent::GetEntry(key, sender) => {
                 //TODO: Proxy the request to the leader

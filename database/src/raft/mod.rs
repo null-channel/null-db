@@ -74,6 +74,7 @@ impl RaftNode {
         }
 
         loop {
+            tokio::time::sleep(Duration::from_millis(10)).await;
             let state = self.run_tick().await;
             self.next_state(state);
         }

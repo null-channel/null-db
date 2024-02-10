@@ -6,6 +6,8 @@ pub mod proto {
 }
 use prost::Message;
 
+use crate::errors::NullDbReadError;
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct HtmlRecord {
     #[serde(rename = "@id")]
@@ -34,15 +36,11 @@ pub enum Record {
 }
 
 impl Record {
-    pub fn serialize(&self) -> String {
+    pub fn serialize(&self) -> Vec<u8> {
         match self {
-            Record::Json(json) => serde_json::to_string(json).unwrap(),
-            Record::Html(html) => quick_xml::se::to_string(html).unwrap(),
-            Record::Proto(proto) => {
-                let mut buf = Vec::new();
-                proto.encode(&mut buf).unwrap();
-                String::from_utf8(buf).unwrap()
-            }
+            Record::Json(json) => serde_json::to_vec(json).unwrap(),
+            Record::Html(html) => quick_xml::se::to_string(html).unwrap().into_bytes(),
+            Record::Proto(proto) => proto.encode_to_vec(),
         }
     }
 
@@ -105,24 +103,24 @@ impl FileEngine {
         }
     }
 
-    pub fn get_record_from_str(&self, value: &str) -> anyhow::Result<Record> {
+    pub fn get_record_from_str(&self, value: &str) -> anyhow::Result<Record,NullDbReadError> {
         match self {
             FileEngine::Json => {
-                let json: JsonRecord = serde_json::from_str(value)?;
+                let json: JsonRecord = serde_json::from_str(value).map_err(|e| NullDbReadError::Corrupted)?;
                 Ok(Record::Json(json))
             }
             FileEngine::Html => {
-                let html: HtmlRecord = from_str(value)?;
+                let html: HtmlRecord = from_str(value).map_err(|e| NullDbReadError::Corrupted)?;
                 Ok(Record::Html(html))
             }
             FileEngine::Proto => {
-                let proto: proto::ProtoRecord = proto::ProtoRecord::decode(value.as_bytes())?;
+                let proto: proto::ProtoRecord = proto::ProtoRecord::decode(value.as_bytes()).map_err(|e| NullDbReadError::Corrupted)?;
                 Ok(Record::Proto(proto))
             }
         }
     }
 
-    pub fn serialize(&self, record: Record) -> String {
+    pub fn serialize(&self, record: Record) -> Vec<u8> {
         record.serialize()
     }
 

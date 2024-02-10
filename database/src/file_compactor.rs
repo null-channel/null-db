@@ -166,7 +166,7 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
                         }
                     }
 
-                    let Some(index) = generate_index_for_segment(&new_segment_name) else {
+                    let Some(index) = generate_index_for_segment(&new_segment_name, db.get_file_engine()) else {
                         panic!("could not generate index of compacted file");
                     };
                     db.add_index(new_segment_name.clone(), index);
@@ -215,7 +215,7 @@ pub fn compactor(db: Data<NullDB>) -> anyhow::Result<()> {
             }
         }
 
-        let Some(index) = generate_index_for_segment(&new_segment_name) else {
+        let Some(index) = generate_index_for_segment(&new_segment_name, db.get_file_engine()) else {
             panic!("failed to create index for new log segment");
         };
         db.add_index(new_segment_name.clone(), index);

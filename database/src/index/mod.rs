@@ -1,3 +1,4 @@
+use crate::file::FileEngine;
 use crate::{errors, nulldb};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ pub type Index = HashMap<String, usize>;
 pub fn generate_indexes(
     path: &Path,
     main_log: &Path,
+    file_engine: FileEngine,
 ) -> anyhow::Result<HashMap<PathBuf, Index>, errors::NullDbReadError> {
     let mut indexes = HashMap::new();
     let mut generation_mapper =
@@ -48,7 +50,7 @@ pub fn generate_indexes(
                     continue;
                 }
 
-                if let Some(index) = generate_index_for_segment(&buff_path) {
+                if let Some(index) = generate_index_for_segment(&buff_path, file_engine.clone()) {
                     indexes.insert(buff_path, index);
                 }
             }
@@ -57,7 +59,7 @@ pub fn generate_indexes(
     Ok(indexes)
 }
 
-pub fn generate_index_for_segment(segment_path: &PathBuf) -> Option<Index> {
+pub fn generate_index_for_segment(segment_path: &PathBuf, file_engine: FileEngine) -> Option<Index> {
     let mut index = Index::new();
 
     println!(
@@ -83,7 +85,7 @@ pub fn generate_index_for_segment(segment_path: &PathBuf) -> Option<Index> {
                 println!("empty line detected");
                 continue;
             }
-            if let Ok(parsed_value) = nulldb::get_key_from_database_line(line) {
+            if let Ok(parsed_value) = nulldb::get_key_from_database_line(line, file_engine) {
                 index.insert(parsed_value, line_num);
             } else {
                 panic!("failed to parse database line to build index");

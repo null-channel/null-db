@@ -14,7 +14,7 @@ use std::io::{prelude::*, self};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc;
+use std::sync::{mpsc, RwLockWriteGuard};
 use std::sync::RwLock;
 use std::time;
 use std::{fs::File, io::BufReader};
@@ -83,6 +83,10 @@ impl NullDB {
         path
     }
 
+    pub fn get_file_engine(&self) -> FileEngine {
+        self.file_engine.clone()
+    }
+
     pub fn new(config: Config) -> anyhow::Result<NullDB, errors::NullDbReadError> {
         let main_log = match Self::create_next_segment_file(config.path.as_path()) {
             Ok(main_log) => main_log,
@@ -90,8 +94,9 @@ impl NullDB {
                 panic!("Could not create new main log file! error: {}", e);
             }
         };
-        let indexes = RwLock::new(generate_indexes(config.path.as_path(), &main_log)?);
         let encoding = config.encoding.clone();
+        let file_engine = FileEngine::new(encoding.as_str());
+        let indexes = RwLock::new(generate_indexes(config.path.as_path(), &main_log, file_engine.clone())?);
         Ok(NullDB {
             main_log_mutex: RwLock::new(main_log),
             main_log_file_mutex: RwLock::new(false),
@@ -323,7 +328,7 @@ impl NullDB {
             let Ok(mut main_log) = main_log else {
                 return Err(NullDbReadError::FailedToObtainMainLog);
             };
-            let Some(index) = index::generate_index_for_segment(&main_log) else {
+            let Some(index) = index::generate_index_for_segment(&main_log,self.file_engine.clone()) else {
                 panic!("could not create index of main log");
             };
             self.add_index(main_log.clone(), index);
@@ -371,19 +376,28 @@ impl NullDB {
                 NullDbReadError::IOError(e)
             })?;
 
-        let rec = record.serialize();
-        let ret = writeln!(file, "{}", rec);
 
-        let Err(e) = ret else { 
-            return Ok(());
-        };
-        // If we failed to write to disk, reset the memory to what it was before
-        if let Some(old_value) = old_value {
-            main_log_memory.insert(record.get_id().clone(), old_value);
-        } else {
-            main_log_memory.remove(&record.get_id());
+        // TODO: Could write partial record to file then fail. need to try and clean up disk
+        let rec = record.serialize();
+        let ret = file.write_all(rec.as_slice()); 
+
+        if let Err(e) = ret {
+            return file_write_error(&mut main_log_memory, old_value, record, e);
         }
-        return Err(NullDbReadError::IOError(e));
+
+        let ret = file.write_all(b"\n");
+
+        if let Err(e) = ret {
+            return file_write_error(&mut main_log_memory, old_value, record, e);
+        }
+
+        let ret = file.flush();
+
+        if let Err(e) = ret {
+            return file_write_error(&mut main_log_memory, old_value, record, e);
+        }
+
+        Ok(())
     }
 
     pub fn add_index(&self, segment: PathBuf, index: Index) -> Option<Index> {
@@ -401,6 +415,18 @@ impl NullDB {
 
         main_index.remove(segment)
     }
+}
+
+fn file_write_error(main_log:&mut RwLockWriteGuard<HashMap<String,Record>>, old_value: Option<Record>, record: Record ,e: io::Error) -> Result<(),NullDbReadError>{
+    // TODO: Could write partial record to file then fail. need to try and clean up disk
+    println!("Could not open main log file! error: {}", e);
+    // If we failed to write to disk, reset the memory to what it was before
+    if let Some(old_value) = old_value {
+        main_log.insert(record.get_id().clone(), old_value);
+    } else {
+        main_log.remove(&record.get_id());
+    }
+    return Err(NullDbReadError::IOError(e));
 }
 
 fn get_value_from_segment(
@@ -438,20 +464,9 @@ pub fn get_value_from_database(
 
 pub fn get_key_from_database_line(
     value: String,
+    file_engine: FileEngine,
 ) -> anyhow::Result<String, errors::NullDbReadError> {
-    let split = value.split(":").collect::<Vec<&str>>();
-    if split.len() != 2 {
-        return Err(errors::NullDbReadError::Corrupted);
-    }
-
-    let val = split[1].to_string().clone();
-    if val == TOMBSTONE {
-        return Err(errors::NullDbReadError::ValueDeleted);
-    }
-
-    let key = split[0].to_string().clone();
-
-    Ok(key)
+    Ok(file_engine.get_record_from_str(&value)?.get_id())
 }
 
 pub fn check_file_for_key(key: String, file: File) -> Result<String, errors::NullDbReadError> {

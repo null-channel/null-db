@@ -7,6 +7,7 @@ use super::{grpcserver::RaftEvent, State, TIME_OUT};
 pub struct FollowerState {
     pub last_heartbeat: Instant,
     pub term: u32,
+    pub voted: bool,
 }
 
 impl FollowerState {
@@ -14,12 +15,13 @@ impl FollowerState {
         FollowerState {
             last_heartbeat,
             term,
+            voted: false,
         }
     }
 
     pub fn tick(&mut self) -> Option<State> {
         if self.last_heartbeat.elapsed() > TIME_OUT {
-            println!(
+            info!(
                 "Becoming Candidate. Failed to get heartbeat from leader. +++++++!!!!!!!!!+++++++"
             );
             return Some(State::Candidate(CandidateState::new(self.term)));
@@ -32,10 +34,25 @@ impl FollowerState {
             RaftEvent::VoteRequest(request, sender) => {
                 info!("Got a vote request: {:?}", request);
                 if request.term >= self.term {
-                    info!("voting yes");
+                    if !self.voted {
+                        info!("voting yes");
+                        self.voted = true;
+                        self.term = request.term;
+                        let reply = raft::VoteReply {
+                            term: self.term,
+                            vote_granted: true,
+                        };
+                        self.last_heartbeat = Instant::now();
+                        sender.send(reply).unwrap();
+                        return Some(State::Follower(FollowerState::new(
+                            Instant::now(),
+                            self.term,
+                        )));
+                    }
+                    info!("voting no because we already voted");
                     let reply = raft::VoteReply {
                         term: self.term,
-                        vote_granted: true,
+                        vote_granted: false,
                     };
                     sender.send(reply).unwrap();
                     return Some(State::Follower(FollowerState::new(

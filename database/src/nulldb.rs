@@ -198,7 +198,7 @@ impl NullDB {
         if let Some(value) = main_log.get(&key) {
             println!(
                 "Returned value from main log! {}, {}",
-                value.get_id(),
+                value.get_key(),
                 value.get_value().unwrap()
             );
             return Ok(value.clone());
@@ -366,7 +366,7 @@ impl NullDB {
         };
 
         // Write to memory
-        let old_value = main_log_memory.insert(record.get_id(), record.clone());
+        let old_value = main_log_memory.insert(record.get_key(), record.clone());
 
         let mut file = OpenOptions::new()
             .write(true)
@@ -422,9 +422,9 @@ fn file_write_error(main_log:&mut RwLockWriteGuard<HashMap<String,Record>>, old_
     println!("Could not open main log file! error: {}", e);
     // If we failed to write to disk, reset the memory to what it was before
     if let Some(old_value) = old_value {
-        main_log.insert(record.get_id().clone(), old_value);
+        main_log.insert(record.get_key().clone(), old_value);
     } else {
-        main_log.remove(&record.get_id());
+        main_log.remove(&record.get_key());
     }
     return Err(NullDbReadError::IOError(e));
 }
@@ -466,7 +466,7 @@ pub fn get_key_from_database_line(
     value: String,
     file_engine: FileEngine,
 ) -> anyhow::Result<String, errors::NullDbReadError> {
-    Ok(file_engine.get_record_from_str(&value)?.get_id())
+    Ok(file_engine.get_record_from_str(&value)?.get_key())
 }
 
 pub fn check_file_for_key(key: String, file: File) -> Result<String, errors::NullDbReadError> {

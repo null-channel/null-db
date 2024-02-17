@@ -1,7 +1,7 @@
 services:
   node1:
     build: .
-    command: 'null-db --roster=node2:3001,node3:3002 --id=3000 --encoding=proto'
+    command: 'null-db --roster=node2:3001,node3:3002 --id=3000 --encoding=json'
     environment:
       - RUST_LOG=info
     ports:
@@ -16,7 +16,7 @@ services:
 
   node2:
     build: .
-    command: 'null-db --roster=node1:3000,node3:3002 --id=3001 --encoding=proto'
+    command: 'null-db --roster=node1:3000,node3:3002 --id=3001 --encoding=json'
     environment:
       - RUST_LOG=info
     ports:
@@ -31,7 +31,7 @@ services:
 
   node3:
     build: .
-    command: 'null-db --roster=node2:3001,node1:3000 --id=3002 --encoding=proto'
+    command: 'null-db --roster=node2:3001,node1:3000 --id=3002 --encoding=json'
     environment:
       - RUST_LOG=info
     ports:

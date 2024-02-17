@@ -44,7 +44,7 @@ impl Record {
         }
     }
 
-    pub fn get_id(&self) -> String {
+    pub fn get_key(&self) -> String {
         match self {
             Record::Json(json) => json.key.clone(),
             Record::Html(html) => html.key.clone(),

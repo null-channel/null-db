@@ -1,5 +1,6 @@
 use std::hash::{Hash, Hasher};
 
+// TODO: Move this to file::Record and delete this
 #[derive(Debug)]
 pub struct Record {
     key: String,

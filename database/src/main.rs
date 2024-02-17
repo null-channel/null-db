@@ -169,6 +169,8 @@ mod tests {
     use std::path;
     use std::path::PathBuf;
 
+    use crate::file::FileEngine;
+    use crate::file::Record;
     use crate::nulldb::create_db;
     use crate::nulldb::Config;
     use crate::nulldb::NullDB;
@@ -182,14 +184,14 @@ mod tests {
             let tmp_dir = TempDir::new().expect("could not get temp dir");
             let _workdir = setup_base_data(tmp_dir.path(), cargo_path);
 
-            let config = Config::new(tmp_dir.into_path(), false);
+            let config = Config::new(tmp_dir.into_path(), false, "html".to_string());
             let db = create_db(config).expect("could not start database");
 
             let result = db
                 .get_value_for_key("name".to_string())
                 .expect("should retrive value");
 
-            assert_eq!(result, "name:marek");
+            check_record(&result, "name", "name:marek");
         }
     }
 
@@ -200,16 +202,21 @@ mod tests {
             let tmp_dir = TempDir::new().expect("could not get temp dir");
             let _workdir = setup_base_data(tmp_dir.path(), path);
 
-            let config = Config::new(tmp_dir.into_path(), false);
+            let config = Config::new(tmp_dir.into_path(), false, "html".to_string());
             let db = create_db(config).expect("could not start database");
 
-            put_lots_of_data(&db, 10000);
+            put_lots_of_data(&db, 10000, db.get_file_engine());
             let result = db
                 .get_value_for_key("name".to_string())
                 .expect("should retrive value");
 
-            assert_eq!(result, "name:marek");
+            check_record(&result, "name", "name:marek");
         }
+    }
+
+    fn check_record(record: &Record, key: &str, value: &str) {
+        assert_eq!(record.get_key(), key);
+        assert_eq!(record.get_value().unwrap(), value);
     }
 
     #[test]
@@ -219,13 +226,13 @@ mod tests {
             let tmp_dir = TempDir::new().expect("could not get temp dir");
             let _workdir = setup_base_data(tmp_dir.path(), path);
 
-            let config = Config::new(tmp_dir.into_path(), false);
+            let config = Config::new(tmp_dir.into_path(), false, "html".to_string());
             let db = create_db(config).expect("could not start database");
 
             for i in 0..10 {
                 let start = std::time::Instant::now();
 
-                put_lots_of_data(&db, 10000);
+                put_lots_of_data(&db, 10000, db.get_file_engine());
 
                 let end = (std::time::Instant::now() - start).as_millis();
                 println!("iteration {}(ms): {}", i, end);
@@ -240,12 +247,18 @@ mod tests {
         }
     }
 
-    fn put_lots_of_data(ndb: &Data<NullDB>, counter: i32) {
+    fn put_lots_of_data(ndb: &Data<NullDB>, counter: i32, file_engine: FileEngine) {
         let mut rng = thread_rng();
-        for _ in 0..counter {
-            ndb.write_value_to_log(
+        for i in 0..counter {
+            let index = i.try_into().unwrap();
+            let r = file_engine.new_record(
                 get_random_string(rng.gen_range(1..10)),
-                get_random_string(10),
+                index,
+                None,
+                Some(get_random_string(10)),
+            );
+            ndb.write_value_to_log(
+                r
             )
             .expect("failed to write to log");
         }

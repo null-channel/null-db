@@ -74,13 +74,23 @@ impl RaftNode {
         }
 
         loop {
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(Duration::from_millis(25)).await;
             let state = self.run_tick().await;
             self.next_state(state);
         }
     }
 
     async fn run_tick(&mut self) -> Option<State> {
+        match self.receiver.try_recv() {
+            Ok(event) => {
+            info!("Got a message");
+                self.state
+                    .on_message(event, &self.config, &mut self.raft_clients, self.log.clone())
+                    .await
+            },
+            Err(_) => None,
+        };
+
         let state = self
             .state
             .tick(&self.config, self.log.clone(), &mut self.raft_clients)
@@ -88,16 +98,7 @@ impl RaftNode {
         if state.is_some() {
             return state;
         }
-
-        match self.receiver.try_recv() {
-            Ok(event) => {
-            info!("Got a message");
-                self.state
-                    .on_message(event, &self.config, &mut self.raft_clients, self.log.clone())
-                    .await
-            }
-            Err(_) => None,
-        }
+        None
     }
 
     fn next_state(&mut self, state: Option<State>) {

@@ -47,7 +47,7 @@ impl CandidateState {
                 self.yes_votes += 1;
             } else {
                 self.no_votes += 1;
-            }
+            }  
             
             if response.term > self.current_term {
                 info!("Becoming Follower. Lost election due to term. +++++++!!!!!!!!!+++++++");
@@ -81,7 +81,6 @@ impl CandidateState {
         }
         info!("Sending vote requests to all nodes");
         for nodes in clients.values_mut() {
-            info!("Sending vote request to node: {:?}", nodes);
             let node = nodes.clone();
             let request = tonic::Request::new(raft::VoteRequest {
                 term: self.current_term,

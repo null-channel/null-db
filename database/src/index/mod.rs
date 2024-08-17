@@ -6,6 +6,7 @@ use std::fs::OpenOptions;
 use std::io::{prelude::*, BufReader};
 use std::path::{Path, PathBuf};
 
+// TODO: update to be <String, (usize, usize)> to support byte read range queries
 pub type Index = HashMap<String, usize>;
 
 pub fn generate_indexes(

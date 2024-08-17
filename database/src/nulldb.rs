@@ -24,8 +24,11 @@ pub const TOMBSTONE: &str = "~tombstone~";
 pub const LOG_SEGMENT_EXT: &str = "nullsegment";
 
 pub struct NullDB {
+    //TODO: maybe make this not lock?
     main_log_mutex: RwLock<PathBuf>,
+    //TODO: remove this with atomic offset write
     main_log_file_mutex: RwLock<bool>,
+    //TODO: remove this and just read from disk because we don't need to lock it.
     main_log_memory_mutex: RwLock<HashMap<String, Record>>,
     // Segment, Index
     log_indexes: RwLock<HashMap<PathBuf, Index>>,

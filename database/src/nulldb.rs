@@ -28,7 +28,7 @@ pub struct NullDB {
     main_log_mutex: RwLock<PathBuf>,
     //TODO: remove this with atomic offset write
     main_log_file_mutex: RwLock<bool>,
-    //TODO: remove this and just read from disk because we don't need to lock it.
+    //TODO: Do we add atomic offset to read from the above file?
     main_log_memory_mutex: RwLock<HashMap<String, Record>>,
     // Segment, Index
     log_indexes: RwLock<HashMap<PathBuf, Index>>,

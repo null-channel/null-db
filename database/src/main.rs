@@ -1,3 +1,5 @@
+#![feature(test)]
+
 use crate::nulldb::create_db;
 use actix_web::{
     delete, get, post,
@@ -6,10 +8,9 @@ use actix_web::{
 };
 use clap::Parser;
 use errors::NullDbReadError;
-use file_reader::EasyReader;
 use nulldb::{Config, DatabaseLog, NullDB};
 use raft::grpcserver::RaftEvent;
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 use tokio::{
     signal::unix::{signal, SignalKind},
     sync::mpsc::Sender,
@@ -19,7 +20,6 @@ use tokio_util::sync::CancellationToken;
 mod errors;
 mod file;
 mod file_compactor;
-mod file_reader;
 mod index;
 mod nulldb;
 mod raft;
@@ -114,13 +114,12 @@ async fn main() -> Result<(), std::io::Error> {
     });
 
     println!("starting web server");
-    HttpServer::new(move || {
+    let _ = HttpServer::new(move || {
         App::new()
             .app_data(sender_ark.clone())
             .service(get_value_for_key)
             .service(put_value_for_key)
             .service(delete_value_for_key)
-            .service(compact_data)
             .service(get_index)
     })
     .bind(format!("0.0.0.0:{port}"))?
@@ -130,10 +129,7 @@ async fn main() -> Result<(), std::io::Error> {
 }
 
 fn parse_roster(roster: Option<String>) -> Option<Vec<String>> {
-    match roster {
-        Some(r) => Some(r.split(",").map(Into::into).collect::<Vec<String>>()),
-        None => None,
-    }
+    roster.map(|r| r.split(",").map(Into::into).collect::<Vec<String>>())
 }
 
 fn get_work_dir() -> PathBuf {
@@ -205,21 +201,12 @@ pub async fn delete_value_for_key(db: Data<NullDB>, key: web::Path<String>) -> i
     }
 }
 
-#[get("/v1/management/compact")]
-pub async fn compact_data(db: Data<NullDB>) -> impl Responder {
-    println!("compacting!");
-    let res = file_compactor::compactor(db);
-
-    if res.is_ok() {
-        return HttpResponse::Ok();
-    }
-
-    HttpResponse::InternalServerError()
-}
+extern crate test;
 
 #[cfg(test)]
 mod tests {
 
+    use crate::nulldb::DatabaseLog;
     use rand::{thread_rng, Rng};
     use std::env;
     use std::fs;
@@ -234,18 +221,17 @@ mod tests {
     use actix_web::web::Data;
     use rand::distributions::Alphanumeric;
     use tempfile::TempDir;
+
     #[test]
     fn get_value_for_key() {
         if let Ok(cargo_path) = env::var("CARGO_MANIFEST_DIR") {
             let tmp_dir = TempDir::new().expect("could not get temp dir");
-            let _workdir = setup_base_data(tmp_dir.path(), cargo_path);
+            setup_base_data(tmp_dir.path(), cargo_path);
 
             let config = Config::new(tmp_dir.into_path(), false, "html".to_string());
             let db = create_db(config).expect("could not start database");
 
             let result = db.get_value_for_key("name").expect("should retrive value");
-
-            let mut my_age = 76;
 
             check_record(&result, "name", "name:marek");
         }
@@ -256,7 +242,7 @@ mod tests {
         if let Ok(path) = env::var("CARGO_MANIFEST_DIR") {
             // Create a directory inside of `std::env::temp_dir()`
             let tmp_dir = TempDir::new().expect("could not get temp dir");
-            let _workdir = setup_base_data(tmp_dir.path(), path);
+            setup_base_data(tmp_dir.path(), path);
 
             let config = Config::new(tmp_dir.into_path(), false, "html".to_string());
             let db = create_db(config).expect("could not start database");
@@ -278,7 +264,7 @@ mod tests {
         if let Ok(path) = env::var("CARGO_MANIFEST_DIR") {
             // Create a directory inside of `std::env::temp_dir()`
             let tmp_dir = TempDir::new().expect("could not get temp dir");
-            let _workdir = setup_base_data(tmp_dir.path(), path);
+            setup_base_data(tmp_dir.path(), path);
 
             let config = Config::new(tmp_dir.into_path(), false, "html".to_string());
             let db = create_db(config).expect("could not start database");
@@ -314,13 +300,7 @@ mod tests {
     }
 
     fn setup_base_data(dir: &path::Path, cargo_path: String) {
-        println!(
-            "{}",
-            format!(
-                "{}/{}",
-                cargo_path, "recources/test-segments/1-1.nullsegment"
-            )
-        );
+        println!("{}/recources/test-segments/1-1.nullsegment", cargo_path);
         println!("{}", get_dir(dir, "1-1.nullsegment").to_str().unwrap());
 
         fs::copy(
@@ -361,7 +341,6 @@ mod tests {
             .sample_iter(&Alphanumeric)
             .take(length)
             .collect();
-        let s = std::str::from_utf8(&chars).unwrap().to_string();
-        return s;
+        std::str::from_utf8(&chars).unwrap().to_string()
     }
 }

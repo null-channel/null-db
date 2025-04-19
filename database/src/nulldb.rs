@@ -3,7 +3,6 @@ use crate::file::{file_engine::FileEngine, record::Record};
 use crate::index;
 use crate::index::*;
 use crate::raft::raft::LogEntry;
-use crate::EasyReader;
 use crate::{errors, file_compactor, utils};
 use actix_web::web::Data;
 use anyhow::anyhow;
@@ -20,7 +19,6 @@ use std::sync::{mpsc, RwLockWriteGuard};
 use std::time;
 use std::{fs::File, io::BufReader};
 
-pub const TOMBSTONE: &str = "~tombstone~";
 pub const LOG_SEGMENT_EXT: &str = "nullsegment";
 
 pub struct NullDB {
@@ -74,7 +72,6 @@ pub trait DatabaseLog {
     fn get_file_engine(&self) -> FileEngine;
     fn get_main_log(&self) -> anyhow::Result<PathBuf>;
     fn delete_record(&self, key: String) -> Result<(), NullDbReadError>;
-    fn get_latest_record_from_disk(&self) -> Result<Record, errors::NullDbReadError>;
     fn get_value_for_key(&self, key: &str) -> Result<Record, errors::NullDbReadError>;
     fn log(&self, key: String, value: String, index: u64) -> anyhow::Result<(), NullDbReadError>;
     fn log_entries(
@@ -124,56 +121,6 @@ impl DatabaseLog for NullDB {
             self.file_engine
                 .new_tombstone_record(key, self.current_raft_index.load(Ordering::Relaxed)),
         )
-    }
-
-    fn get_latest_record_from_disk(&self) -> Result<Record, errors::NullDbReadError> {
-        let Ok(config) = self.config.read() else {
-            info!("could not get readlock on config!");
-            panic!("we have poisiod our locks");
-        };
-        // If not in main log, check all the segments
-        let mut generation_mapper =
-            utils::get_generations_segment_mapper(&config.path, file_compactor::SEGMENT_FILE_EXT)?;
-
-        /*
-         * unstable is faster, but could reorder "same" values.
-         * We will not have same values as this was from a set.
-         */
-        let mut gen_vec: Vec<i32> = generation_mapper.generations.into_iter().collect();
-        gen_vec.sort_unstable();
-
-        //Umm... I don't know if this is the best way to do this. it's what I did though, help me?
-        // TODO: main_log_filename is never used. If there is a reason for testing the lock, it should be documented.
-        let Ok(main_log_filename) = self.main_log_mutex.read() else {
-            panic!("we have poisiod our locks... don't do this please");
-        };
-
-        for current_gen in gen_vec {
-            info!("Gen {current_gen} in progress");
-            /*
-             * Power of rust, we KNOW that this is safe because we just built it...
-             * but it's better to check anyhow... sometimes annoying but.
-             */
-            if let Some(file_name_vec) = generation_mapper
-                .gen_name_segment_files
-                .get_mut(&current_gen)
-            {
-                file_name_vec.sort_unstable();
-
-                // TODO: The comment below seems to suggest that time should be included in the file name,
-                // but it is not. What is the correct behavior?
-                let then = time::Instant::now();
-
-                // TODO: Clippy is very mad here because the loop is never looping. Is this the intended behavior?
-                for file_path in file_name_vec.into_iter().rev() {
-                    //file names: [gen]-[time].nullsegment
-                    let path = self.get_path_for_file(format!("{current_gen}-{file_path}"));
-
-                    return get_value_from_segment(&path, 0, self.file_engine);
-                }
-            }
-        }
-        Err(errors::NullDbReadError::ValueNotFound)
     }
 
     fn get_value_for_key(&self, key: &str) -> Result<Record, errors::NullDbReadError> {
@@ -487,27 +434,4 @@ pub fn get_key_from_database_line(
     file_engine: FileEngine,
 ) -> Result<String, errors::NullDbReadError> {
     Ok(file_engine.deserialize(value)?.get_key())
-}
-
-pub fn check_file_for_key(key: &str, file: File) -> Result<String, errors::NullDbReadError> {
-    let mut reader = EasyReader::new(file).unwrap();
-    // Generate index (optional)
-    if let Err(e) = reader.build_index() {
-        return Err(errors::NullDbReadError::IOError(e));
-    }
-    reader.eof();
-    while let Some(line) = reader.prev_line().unwrap() {
-        let split = line.split(':').collect::<Vec<&str>>();
-        if split.len() != 2 {
-            continue;
-        }
-        if split[0] == key {
-            let val = split[1];
-            if val == TOMBSTONE {
-                return Err(errors::NullDbReadError::ValueDeleted);
-            }
-            return Ok(val.to_owned());
-        }
-    }
-    Err(errors::NullDbReadError::ValueNotFound)
 }

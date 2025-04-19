@@ -33,6 +33,7 @@ impl CandidateState {
     pub async fn tick(
         &mut self,
         config: &RaftConfig,
+        // TODO: This should be "DatabaseLog" not "NullDB"
         log: Data<NullDB>,
         clients: RaftClients,
     ) -> Option<State> {

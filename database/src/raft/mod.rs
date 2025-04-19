@@ -2,7 +2,7 @@ use self::{
     candidate::CandidateState, follower::FollowerState, grpcserver::RaftEvent, leader::LeaderState,
 };
 use crate::{nulldb::NullDB, raft::grpcserver::RaftGRPCServer};
-use actix_web::web::{to, Data};
+use actix_web::web::Data;
 use config::RaftConfig;
 use log::info;
 use raft::raft_server::RaftServer;

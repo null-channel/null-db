@@ -100,15 +100,6 @@ impl Record {
         }
     }
 
-    /// get_index returns the index of the record.
-    pub fn get_index(&self) -> u64 {
-        match self {
-            Record::Json(json) => json.index,
-            Record::Html(html) => html.index,
-            Record::Proto(proto) => proto.index,
-        }
-    }
-
     /// get_tombstone returns the tombstone of the record.
     pub fn get_tombstone(&self) -> Option<bool> {
         match self {

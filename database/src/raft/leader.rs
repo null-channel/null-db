@@ -1,9 +1,5 @@
 use super::{config::RaftConfig, grpcserver::RaftEvent, RaftClients, State};
-use crate::{
-    errors::NullDbReadError,
-    nulldb::{DatabaseLog, NullDB},
-    raft::raft,
-};
+use crate::{errors::NullDbReadError, nulldb::DatabaseLog, raft::raft};
 use actix_web::web::Data;
 use log::info;
 use std::time::{Duration, Instant};

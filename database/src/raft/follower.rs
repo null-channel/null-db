@@ -1,7 +1,7 @@
 use super::{grpcserver::RaftEvent, State, TIME_OUT};
 use crate::{
     errors::NullDbReadError,
-    nulldb::{DatabaseLog, NullDB},
+    nulldb::DatabaseLog,
     raft::{candidate::CandidateState, raft},
 };
 use actix_web::web::Data;

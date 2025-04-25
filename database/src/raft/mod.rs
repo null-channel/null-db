@@ -67,7 +67,7 @@ impl RaftNode {
         &mut self,
         sender: Sender<RaftEvent>,
         cancel: CancellationToken,
-    ) -> Result<(), Status> {
+    ) -> Result<(), RaftConnectionError> {
         // Start the gRPC server
         let id = self.config.candidate_id.clone();
         tokio::spawn(async move {
@@ -81,10 +81,15 @@ impl RaftNode {
 
         // Connect to all other nodes
         let config = self.config.clone();
-        let raft_clients = self.raft_clients.clone();
-        connect_to_raft_servers(config, raft_clients);
+        let clients = connect_to_raft_servers(config).await?;
+        {
+            let mut lk = self.raft_clients.clone();
+            let mut raft_clients = lk.lock().unwrap();
+            raft_clients.extend(clients);
+        }
 
         // Main loop
+        println!("Starting raft main loop");
         loop {
             if cancel.is_cancelled() {
                 break;
@@ -178,41 +183,58 @@ impl State {
     }
 }
 
-fn connect_to_raft_servers(config: RaftConfig, raft_clients: RaftClients) {
-    tokio::spawn(async move {
-        let Some(roster) = config.roster else {
-            return;
-        };
+#[derive(Debug)]
+pub enum RaftConnectionError {
+    EmptyRoster,
+    MaxAttemptsReached(String),
+    JoinError,
+}
 
-        for node in roster {
-            // skip the current node
-            if node == config.candidate_id {
-                continue;
-            }
+async fn connect_to_raft_servers(
+    config: RaftConfig,
+) -> Result<
+    HashMap<String, raft::raft_client::RaftClient<tonic::transport::channel::Channel>>,
+    RaftConnectionError,
+> {
+    let Some(roster) = config.roster else {
+        return Err(RaftConnectionError::EmptyRoster);
+    };
 
-            let nameport = node.split(':').collect::<Vec<&str>>();
-            let ip = format!("http://{}:{}", nameport[0], nameport[1]);
-            info!("Connecting to {ip}");
-
-            // try to connect to the node
-            // if it fails, the node is not up yet
-            // so we will try again in the next iteration
-            let raft_clients_clone = raft_clients.clone();
-            tokio::spawn(async move {
-                loop {
-                    let raft_client = raft::raft_client::RaftClient::connect(ip.clone()).await;
-                    if let Ok(raft_client) = raft_client {
-                        {
-                            let mut raft_clients = raft_clients_clone.lock().unwrap();
-                            raft_clients.insert(node, raft_client);
-                        }
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            });
+    let mut tasks = tokio::task::JoinSet::new();
+    for node in roster {
+        if node == config.candidate_id {
+            continue;
         }
-    });
+        tasks.spawn(async move { (node.clone(), connect_to_raft_server(node).await) });
+    }
+
+    let mut clients = HashMap::new();
+    for (node, client) in tasks.join_all().await {
+        clients.insert(node, client?);
+    }
+    Ok(clients)
+}
+
+pub async fn connect_to_raft_server(
+    node: String,
+) -> Result<raft::raft_client::RaftClient<tonic::transport::Channel>, RaftConnectionError> {
+    // try to connect to the node
+    // if it fails, the node is not up yet
+    // so we will try again in the next iteration after a backoff period
+    let mut attempt = 0;
+    let max_attempts = 6;
+    while attempt < max_attempts {
+        println!("Connecting to {node}");
+        match raft::raft_client::RaftClient::connect(format!("http://{node}")).await {
+            Ok(raft_client) => {
+                return Ok(raft_client);
+            }
+            Err(e) => println!("Error connecting to {node}: {e}"),
+        }
+        tokio::time::sleep(Duration::from_secs(2 ^ attempt)).await;
+        attempt += 1;
+    }
+    Err(RaftConnectionError::MaxAttemptsReached(node))
 }
 
 /// Start raft gRPC server
@@ -225,7 +247,7 @@ pub async fn start_raft_server(
     };
     let addr = format!("0.0.0.0:{port}").parse().unwrap();
     let server = RaftServer::new(raft_server);
-    Server::builder().add_service(server).serve(addr).await?;
     println!("Raft server listening on: {addr}");
+    Server::builder().add_service(server).serve(addr).await?;
     Ok(())
 }
